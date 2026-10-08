@@ -26,6 +26,13 @@ EXAMPLE
   ./fichero -d /dev/rfcomm0 -D 2 -s -t 'hello'
 ```
 
+## Dependencies
+
+DataMatrix 2D code requires external library to be installed
+```
+apt install libdmtx0b libdmtx-dev
+```
+
 ## TODO
 * barcode support (EAN13, EAN5 and CODE128)
 * use PCF (binary) fonts instead of BDF (fonts)

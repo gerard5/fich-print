@@ -6,7 +6,12 @@ TARGET := fichero
 SRC_DIR := src
 
 SRC := main.c fichero.c font_pcf.c
-LIBS += -ldmtx
+
+# DataMatrix (libdmtx)
+ifeq ($(shell pkg-config --exists libdmtx && echo yes),yes)
+    CFLAGS += $(shell pkg-config --cflags libdmtx) -DHAVE_LIBDMTX
+    LIBS += $(shell pkg-config --libs libdmtx)
+endif
 
 SRC_FILES := $(addprefix $(SRC_DIR)/, $(SRC))
 HDR_FILES := $(wildcard $(SRC_DIR)/*.h)
