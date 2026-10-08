@@ -326,7 +326,7 @@ static unsigned char *build_datamatrix_bitmap(const char *text_str, int *out_hei
 		return NULL;
 	}
 
-	int offset_x = (LABEL_WIDTH - dm_width) / 2;
+	int offset_x = 0; /* TODO: use switch to center/align: (LABEL_WIDTH - dm_width) / 2; */
 	int offset_y = (LABEL_HEIGHT - dm_height) / 2;
 
 	for (int y = 0; y < dm_height; y++) {
