@@ -5,7 +5,7 @@ LIBS ?=
 TARGET := fichero
 SRC_DIR := src
 
-SRC := main.c fichero.c font_bdf.c
+SRC := main.c fichero.c font_pcf.c
 LIBS += -ldmtx
 
 SRC_FILES := $(addprefix $(SRC_DIR)/, $(SRC))

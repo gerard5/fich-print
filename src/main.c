@@ -6,7 +6,7 @@
  *   # open rfcomm0 in auxiliary terminal window
  *   sudo rfcomm connect 0 12:0F:F1:CE:C0:DE 1
  *   # then run in main terminal window
- *   ./program -f RobotoThinCondensed-18.bdf -d /dev/rfcomm0 -D 2 -s -t 'Hello'
+ *   ./program -f RobotoThinCondensed-18.pcf -d /dev/rfcomm0 -D 2 -s -t 'Hello'
  *
  */
 
@@ -22,7 +22,7 @@
 
 #include <dmtx.h>
 #include "fichero.h"
-#include "font_bdf.h"
+#include "font_pcf.h"
 
 /* LABEL_WIDTH:HEIGHT is 90deg CCW against FICHERO_WIDTH:HEIGHT */
 #define LABEL_WIDTH  (FICHERO_DEFAULT_HEIGHT_PELS)
@@ -208,10 +208,10 @@ static unsigned char *generate_test_pattern(int height_pels)
 	return bitmap_data;
 }
 
-/* Build bitmap from text using BDF font */
+/* Build bitmap from text using PCF font */
 static unsigned char *build_text_bitmap(const char *text_str, const char *font_path, int *out_height_pels)
 {
-	if (!load_bdf(font_path)) {
+	if (!load_pcf(font_path, 0)) {
 		fprintf(stderr, "Unable to load font \"%s\"\n", font_path);
 		return NULL;
 	}
@@ -236,12 +236,15 @@ static unsigned char *build_text_bitmap(const char *text_str, const char *font_p
 	if (str == NULL) {
 		perror("Failed to duplicate text string");
 		free(label_buf);
+		free_pcf(-1);
 		return NULL;
 	}
 
 	unescape_string(str);
-	draw_label(&label_plane, str);
+	draw_label(&label_plane, 0, str);
 	free(str);
+
+	free_pcf(-1);
 
 	int height = LABEL_WIDTH;
 	int width = LABEL_HEIGHT;
@@ -405,14 +408,14 @@ static void get_default_font_path(char *buf, size_t bufsiz, const char *argv0)
 	if (len != -1) {
 		exe_path[len] = '\0';
 		char *dir = dirname(exe_path);
-		snprintf(buf, bufsiz, "%s/bdf/fichero.bdf", dir);
+		snprintf(buf, bufsiz, "%s/fonts/fichero.pcf", dir);
 		if (access(buf, R_OK) == 0) {
 			return;
 		}
 	}
 
 	/* Fallback to relative path */
-	snprintf(buf, bufsiz, "bdf/fichero.bdf");
+	snprintf(buf, bufsiz, "fonts/fichero.pcf");
 }
 
 static void print_usage(const char *prog_name)
@@ -424,8 +427,8 @@ static void print_usage(const char *prog_name)
 	printf("  -i <file>     Load input from PBM (P1) file\n");
 	printf("  -D <density>  Set density 0-2 (default: 1)\n");
 	printf("  -p <type>     Paper type: 0=gap, 1=black_mark, 2=continuous (default: 0)\n");
-	printf("  -t <text>     Label text (format \\a-center \\f-left \\r-right \\b-bold toggle)\n");
-	printf("  -f <font>     path to bdf font\n");
+	printf("  -t <text>     Label text (format \\a-center \\f-left \\r-right \\b-bold toggle \\n-newline)\n");
+	printf("  -f <font>     path to pcf font\n");
 	printf("  -b <text>     Generate datamatrix code\n");
 	printf("  -s            Preview before print\n");
 	printf("  -h            Show this help message\n");
