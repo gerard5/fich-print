@@ -1,0 +1,16 @@
+# build artifacts
+*.o
+*.d
+
+# temporary files 
+.*.swp
+.*.swo
+.swp
+.swo
+
+# sesions
+Session.vim
+
+# ctags
+tags
+TAGS
