@@ -6,6 +6,7 @@ TARGET := fichero
 SRC_DIR := src
 
 SRC := main.c fichero.c font_bdf.c
+LIBS += -ldmtx
 
 SRC_FILES := $(addprefix $(SRC_DIR)/, $(SRC))
 HDR_FILES := $(wildcard $(SRC_DIR)/*.h)

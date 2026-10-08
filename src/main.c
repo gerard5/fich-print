@@ -19,6 +19,8 @@
 #include <getopt.h>
 #include <ctype.h>
 #include <libgen.h>
+
+#include <dmtx.h>
 #include "fichero.h"
 #include "font_bdf.h"
 
@@ -268,6 +270,108 @@ static unsigned char *build_text_bitmap(const char *text_str, const char *font_p
 	return bitmap_data;
 }
 
+/* Build DataMatrix 2D code bitmap */
+static unsigned char *build_datamatrix_bitmap(const char *text_str, int *out_height_pels)
+{
+	static gplane_t label_plane;
+	uint8_t *label_buf = malloc(LABEL_WIDTH * LABEL_HEIGHT * sizeof(uint8_t));
+	if (label_buf == NULL) {
+		perror("Failed to allocate bitmap memory for label");
+		return NULL;
+	}
+
+	label_plane.pixels = (uint8_t *)label_buf;
+	label_plane.width = LABEL_WIDTH;
+	label_plane.height = LABEL_HEIGHT;
+	label_plane.stride = LABEL_WIDTH;
+	label_plane.stride_bytes = LABEL_WIDTH * sizeof(uint8_t);
+	label_plane.size_bytes = LABEL_WIDTH * LABEL_HEIGHT * sizeof(uint8_t);
+	label_plane.size_area = LABEL_WIDTH * LABEL_HEIGHT;
+	memset(label_plane.pixels, 0xff, label_plane.size_bytes);
+
+	DmtxEncode *enc = dmtxEncodeCreate();
+	if (enc == NULL) {
+		fprintf(stderr, "Failed to create libdmtx encoder\n");
+		free(label_buf);
+		return NULL;
+	}
+
+	dmtxEncodeSetProp(enc, DmtxPropSizeRequest, DmtxSymbolSquareAuto);
+	dmtxEncodeSetProp(enc, DmtxPropModuleSize, 2);
+	dmtxEncodeSetProp(enc, DmtxPropMarginSize, 4);
+
+	int messageLen = strlen(text_str);
+	if (dmtxEncodeDataMatrix(enc, messageLen, (unsigned char *)text_str) ==
+		DmtxFail) {
+		fprintf(stderr,
+			"Data Matrix encoding failed (text might be too long for "
+			"specified module size)\n");
+		dmtxEncodeDestroy(&enc);
+		free(label_buf);
+		return NULL;
+	}
+
+	int dm_width = dmtxImageGetProp(enc->image, DmtxPropWidth);
+	int dm_height = dmtxImageGetProp(enc->image, DmtxPropHeight);
+	int dm_bytes_per_pixel =
+		dmtxImageGetProp(enc->image, DmtxPropBytesPerPixel);
+
+	if (dm_height > LABEL_HEIGHT || dm_width > LABEL_WIDTH) {
+		fprintf(stderr,
+			"Error: Generated Data Matrix (%dx%d) exceeds label bounds "
+			"(%dx%d)\n",
+			dm_width, dm_height, LABEL_WIDTH, LABEL_HEIGHT);
+		dmtxEncodeDestroy(&enc);
+		free(label_buf);
+		return NULL;
+	}
+
+	int offset_x = (LABEL_WIDTH - dm_width) / 2;
+	int offset_y = (LABEL_HEIGHT - dm_height) / 2;
+
+	for (int y = 0; y < dm_height; y++) {
+		for (int x = 0; x < dm_width; x++) {
+			unsigned char *dm_pixel =
+				enc->image->pxl +
+				((dm_height - 1 - y) * dm_width + x) * dm_bytes_per_pixel;
+
+			if (*dm_pixel < 128) {
+				int target_x = offset_x + x;
+				int target_y = offset_y + y;
+				label_buf[target_y * LABEL_WIDTH + target_x] = 0;
+			}
+		}
+	}
+
+	dmtxEncodeDestroy(&enc);
+
+	int height = LABEL_WIDTH;
+	int width = LABEL_HEIGHT;
+	*out_height_pels = LABEL_WIDTH;
+
+	size_t bitmap_size = FICHERO_WIDTH_BYTES * height;
+	unsigned char *bitmap_data = (unsigned char *)calloc(1, bitmap_size);
+	if (bitmap_data == NULL) {
+		free(label_buf);
+		perror("Failed to allocate bitmap memory for printer buffer");
+		return NULL;
+	}
+
+	for (int y = 0; y < height; y++) {
+		for (int x = 0; x < width; x++) {
+			int pixel = label_buf[LABEL_WIDTH * (width - x - 1) + y];
+			if (pixel == 0) {
+				int byte_idx = y * FICHERO_WIDTH_BYTES + (x / 8);
+				int bit_idx = 7 - (x % 8);
+				bitmap_data[byte_idx] |= (1 << bit_idx);
+			}
+		}
+	}
+
+	free(label_buf);
+	return bitmap_data;
+}
+
 /* Display terminal ASCII preview and wait for confirmation */
 static bool print_preview(const unsigned char *bitmap_data, int height_pels)
 {
@@ -322,6 +426,7 @@ static void print_usage(const char *prog_name)
 	printf("  -p <type>     Paper type: 0=gap, 1=black_mark, 2=continuous (default: 0)\n");
 	printf("  -t <text>     Label text (format \\a-center \\f-left \\r-right \\b-bold toggle)\n");
 	printf("  -f <font>     path to bdf font\n");
+	printf("  -b <text>     Generate datamatrix code\n");
 	printf("  -s            Preview before print\n");
 	printf("  -h            Show this help message\n");
 	printf("\nEXAMPLE\n");
@@ -335,6 +440,7 @@ int main(int argc, char **argv)
 	const char *port_path = "/dev/rfcomm0";
 	const char *pbm_filename = NULL;
 	const char *text_str = NULL;
+	const char *dmtx_str = NULL;
 	char font_path_buf[1024];
 	const char *font_path = NULL;
 	int density = 1;
@@ -347,7 +453,7 @@ int main(int argc, char **argv)
 	}
 
 	int opt;
-	while ((opt = getopt(argc, argv, "d:i:D:p:t:f:sh")) != -1) {
+	while ((opt = getopt(argc, argv, "d:i:D:p:t:f:b:sh")) != -1) {
 		switch (opt) {
 			case 'd':
 				port_path = optarg;
@@ -366,6 +472,9 @@ int main(int argc, char **argv)
 				break;
 			case 'f':
 				font_path = optarg;
+				break;
+			case 'b':
+				dmtx_str = optarg;
 				break;
 			case 's':
 				preview = 1;
@@ -397,6 +506,12 @@ int main(int argc, char **argv)
 	}
 	else if (text_str != NULL) {
 		bitmap_data = build_text_bitmap(text_str, font_path, &height_pels);
+		if (bitmap_data == NULL) {
+			goto onError;
+		}
+	}
+	else if (dmtx_str != NULL) {
+		bitmap_data = build_datamatrix_bitmap(dmtx_str, &height_pels);
 		if (bitmap_data == NULL) {
 			goto onError;
 		}

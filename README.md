@@ -17,6 +17,7 @@ OPTIONS
   -p <type>     Paper type: 0=gap, 1=black_mark, 2=continuous (default: 0)
   -t <text>     Label text (format \a-center \f-left \r-right \b-bold toggle)
   -f <font>     path to bdf font
+  -b <text>     Generate datamatrix code
   -s            Preview before print
   -h            Show this help message
 
@@ -26,7 +27,7 @@ EXAMPLE
 ```
 
 ## TODO
-* barcode support (2D Data Matrix, 1D EAN13, EAN5 and CODE128)
+* barcode support (EAN13, EAN5 and CODE128)
 * use PCF (binary) fonts instead of BDF (fonts)
 * add USB support
 * add Niimbot D11, D110 support
