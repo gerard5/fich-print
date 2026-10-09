@@ -409,9 +409,28 @@ int render_char(gplane_t *plane, int typeface_idx, int c, int x, int y, uint8_t 
 	return 1;
 }
 
-void draw_label(gplane_t *plane, int typeface_idx, const char *label_str)
+/* renders single line text */
+void render_text(gplane_t *plane, int typeface_idx, const char *text, int x, int y, uint8_t color)
 {
-	if (label_str == NULL || plane == NULL || typeface_idx < 0 || typeface_idx >= MAX_TYPEFACES) {
+	if (text == NULL || plane == NULL || typeface_idx < 0 || typeface_idx >= MAX_TYPEFACES) {
+		return;
+	}
+
+	int def_w = (typefaces[typeface_idx].raw_data) ? typefaces[typeface_idx].default_width : 8;
+	int current_x = x;
+
+	while (*text != '\0') {
+		int codepoint = next_utf8_codepoint(&text);
+		render_char(plane, typeface_idx, codepoint, current_x, y, color);
+		int step = get_pcf_char_step(typeface_idx, codepoint, def_w);
+		current_x += (step > 0) ? step : def_w;
+	}
+}
+
+/* renders formatted multiline string (\f - left, \a - center \r - right, \b - toggle bold) */
+void render_text_format(gplane_t *plane, int typeface_idx, const char *format_str)
+{
+	if (format_str == NULL || plane == NULL || typeface_idx < 0 || typeface_idx >= MAX_TYPEFACES) {
 		return;
 	}
 
@@ -426,7 +445,7 @@ void draw_label(gplane_t *plane, int typeface_idx, const char *label_str)
 	int base_x = 0;
 	int base_y = -7 + ((int)plane->height - 3 * def_h) / 2 + def_h;
 	bool is_bold = false;
-	const char *ptr = label_str;
+	const char *ptr = format_str;
 	int line_idx = 0;
 	int lines = 0;
 	while (*ptr) {
@@ -438,8 +457,8 @@ void draw_label(gplane_t *plane, int typeface_idx, const char *label_str)
 		return;
 	}
 	base_y -= (def_h * lines / 2);
-	ptr = label_str;
-	while (*ptr && *ptr != '\0' && line_idx < 3) {
+	ptr = format_str;
+	while (*ptr != '\0' && line_idx < 3) {
 		const char *line_end = ptr;
 		while (*line_end != '\n' && *line_end != '\0') {
 			line_end++;

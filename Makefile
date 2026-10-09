@@ -5,7 +5,7 @@ LIBS ?=
 TARGET := fichero
 SRC_DIR := src
 
-SRC := main.c fichero.c font_pcf.c
+SRC := main.c fichero.c fichero_ops.c font_pcf.c
 
 # DataMatrix (libdmtx)
 ifeq ($(shell pkg-config --exists libdmtx && echo yes),yes)

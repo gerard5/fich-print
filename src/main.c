@@ -241,7 +241,7 @@ static unsigned char *build_text_bitmap(const char *text_str, const char *font_p
 	}
 
 	unescape_string(str);
-	draw_label(&label_plane, 0, str);
+	render_text_format(&label_plane, 0, str);
 	free(str);
 
 	free_pcf(-1);
@@ -484,9 +484,13 @@ int main(int argc, char **argv)
 				break;
 
 			case 'h':
-			default:
 				print_usage(argv[0]);
 				return EXIT_SUCCESS;
+
+			case '?':
+			default:
+				print_usage(argv[0]);
+				return EXIT_FAILURE;
 		}
 	}
 
@@ -532,36 +536,37 @@ int main(int argc, char **argv)
 		}
 	}
 
-	if (fichero_open(&p, port_path) < 0) {
+	printer_init(&p, &printer_ops_fichero);
+
+	if (printer_open(&p, port_path) < 0) {
 		goto onError;
 	}
 
-	if (fichero_status(&p, NULL) < 0) {
+	if (printer_status(&p, NULL) < 0) {
 		goto onError;
 	}
 
-	if (fichero_setup_density(&p, density) < 0) {
+	if (printer_setup_density(&p, density) < 0) {
 		goto onError;
 	}
 
-	if (fichero_setup_paper(&p, paper_type) < 0) {
+	if (printer_setup_paper(&p, paper_type) < 0) {
 		goto onError;
 	}
 
-	if (fichero_wakeup(&p) < 0) {
+	if (printer_wakeup(&p) < 0) {
 		goto onError;
 	}
 
-	if (fichero_image(&p, bitmap_data, height_pels) < 0) {
-		free(bitmap_data);
+	if (printer_image(&p, bitmap_data, height_pels) < 0) {
 		goto onError;
 	}
 
-	if (fichero_formfeed(&p) < 0) {
+	if (printer_formfeed(&p) < 0) {
 		goto onError;
 	}
 
-	if (fichero_stop_wait(&p) < 0) {
+	if (printer_stop_wait(&p) < 0) {
 		goto onError;
 	}
 
@@ -569,7 +574,8 @@ int main(int argc, char **argv)
 
 onError:
 	free(bitmap_data);
-	fichero_close(&p);
+
+	printer_close(&p);
 
 	return ret;
 }

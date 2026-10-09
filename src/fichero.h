@@ -33,19 +33,37 @@ enum fichero_paper_type {
 	fichero_paper_continuous = 2,
 };
 
+struct fichero;
+
+typedef struct printer_ops {
+	int (*open)(struct fichero *p, const char *port_path);
+	void (*close)(struct fichero *p);
+	int (*status)(struct fichero *p, int *p_status);
+	int (*setup_density)(struct fichero *p, int density);
+	int (*setup_paper)(struct fichero *p, int paper_type);
+	int (*wakeup)(struct fichero *p);
+	int (*image)(struct fichero *p, const unsigned char *bitmap_data, int height_pels);
+	int (*formfeed)(struct fichero *p);
+	int (*stop_wait)(struct fichero *p);
+} printer_ops_t;
+
 typedef struct fichero {
+	const printer_ops_t *ops;
 	int fd;
 	bool opened;
 } fichero_t;
 
-int fichero_open(fichero_t *p, const char *port_path);
-void fichero_close(fichero_t *p);
-int fichero_status(fichero_t *p, int *p_status);
-int fichero_setup_density(fichero_t *p, int density);
-int fichero_setup_paper(fichero_t *p, int paper_type);
-int fichero_wakeup(fichero_t *p);
-int fichero_image(fichero_t *p, const unsigned char *bitmap_data, int height_pels);
-int fichero_formfeed(fichero_t *p);
-int fichero_stop_wait(fichero_t *p);
+void printer_init(fichero_t *p, const printer_ops_t *driver_ops);
+int printer_open(fichero_t *p, const char *port_path);
+void printer_close(fichero_t *p);
+int printer_status(fichero_t *p, int *p_status);
+int printer_setup_density(fichero_t *p, int density);
+int printer_setup_paper(fichero_t *p, int paper_type);
+int printer_wakeup(fichero_t *p);
+int printer_image(fichero_t *p, const unsigned char *bitmap_data, int height_pels);
+int printer_formfeed(fichero_t *p);
+int printer_stop_wait(fichero_t *p);
+
+extern printer_ops_t printer_ops_fichero;
 
 #endif /* FICHERO_H */
