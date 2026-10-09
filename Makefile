@@ -5,7 +5,13 @@ LIBS ?=
 TARGET := fichero
 SRC_DIR := src
 
-SRC := main.c printer.c aiyin_ops.c niimbot_ops.c font_pcf.c
+SRC := main.c printer.c aiyin_io_fd.c aiyin_io_usb.c aiyin_ops.c niimbot_ops.c font_pcf.c
+
+# libusb-1.0
+ifeq ($(shell pkg-config --exists libusb-1.0 && echo yes),yes)
+    CFLAGS += $(shell pkg-config --cflags libusb-1.0) -DHAVE_LIBUSB
+    LIBS += $(shell pkg-config --libs libusb-1.0)
+endif
 
 # DataMatrix (libdmtx)
 ifeq ($(shell pkg-config --exists libdmtx && echo yes),yes)

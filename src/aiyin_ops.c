@@ -13,6 +13,7 @@
 #include <termios.h>
 
 #include "printer.h"
+#include "aiyin_io.h"
 
 #define _log_prefix          "aiyin: "
 #define _log(fmt, ...)       printf(_log_prefix fmt "\n", ##__VA_ARGS__)
@@ -25,22 +26,23 @@
 #endif
 
 struct aiyin_ctx {
-	int fd;
+	void *io_ctx;
+	const struct aiyin_io_ops *io;
 	int density_level;
 	int paper_type;
 };
 
 /* Helper function: safe write to the printer handling EINTR and partial writes */
-static int aiyin_send_command(int fd, const unsigned char *cmd, size_t size)
+static int aiyin_send_command(struct aiyin_ctx *ctx, const unsigned char *cmd, size_t size)
 {
 	size_t written = 0;
 	while (written < size) {
-		ssize_t n = write(fd, cmd + written, size - written);
+		ssize_t n = ctx->io->write(ctx->io_ctx, cmd + written, size - written);
 		if (n < 0) {
 			if (errno == EINTR || CHECK_WOULD_BLOCK(errno)) {
 				continue;
 			}
-			perror("Critical error writing to RFCOMM port");
+			perror("Critical error writing to printer transport");
 			return -1;
 		}
 		written += (size_t)n;
@@ -49,19 +51,15 @@ static int aiyin_send_command(int fd, const unsigned char *cmd, size_t size)
 }
 
 /* Helper function: read from port with timeout in seconds handling EINTR */
-static int aiyin_read_response(int fd, unsigned char *buffer, size_t max_len, int timeout_sec)
+static int aiyin_read_response(struct aiyin_ctx *ctx, unsigned char *buffer, size_t max_len, int timeout_sec)
 {
 	size_t total_bytes = 0;
-	fd_set set;
 	struct timeval tv;
 
-	/* Wait for first byte with preset timeout */
 	tv.tv_sec = timeout_sec;
 	tv.tv_usec = 0;
 
 	while (total_bytes < max_len) {
-		FD_ZERO(&set);
-		FD_SET(fd, &set);
 
 		if (total_bytes > 0) {
 			/* 100ms inter-byte timeout */
@@ -69,12 +67,12 @@ static int aiyin_read_response(int fd, unsigned char *buffer, size_t max_len, in
 			tv.tv_usec = 100 * 1000;
 		}
 
-		int rv = select(fd + 1, &set, NULL, NULL, &tv);
+		int rv = ctx->io->wait_readable(ctx->io_ctx, &tv);
 		if (rv == -1) {
 			if (errno == EINTR || CHECK_WOULD_BLOCK(errno)) {
 				continue;
 			}
-			perror("Error in select() call");
+			perror("Error in wait_readable() call");
 			return -1;
 		}
 		else if (rv == 0) {
@@ -82,7 +80,7 @@ static int aiyin_read_response(int fd, unsigned char *buffer, size_t max_len, in
 			return (int)total_bytes;
 		}
 
-		ssize_t bytes_read = read(fd, buffer + total_bytes, max_len - total_bytes);
+		ssize_t bytes_read = ctx->io->read(ctx->io_ctx, buffer + total_bytes, max_len - total_bytes);
 		if (bytes_read < 0) {
 			if (errno == EINTR || CHECK_WOULD_BLOCK(errno)) {
 				continue;
@@ -91,7 +89,6 @@ static int aiyin_read_response(int fd, unsigned char *buffer, size_t max_len, in
 			return -1;
 		}
 		else if (bytes_read == 0) {
-			/* Device closed connection */
 			return (int)total_bytes;
 		}
 
@@ -103,31 +100,26 @@ static int aiyin_read_response(int fd, unsigned char *buffer, size_t max_len, in
 
 static int aiyin_open(printer_t *p, const char *port_path)
 {
-	int fd = open(port_path, O_RDWR | O_NOCTTY);
-	if (fd < 0) {
-		perror("Cannot open RFCOMM port");
+	struct aiyin_ctx *ctx = calloc(1, sizeof(*ctx));
+
+	if (ctx == NULL) {
 		return printer_status_error;
 	}
 
-	struct aiyin_ctx *ctx = calloc(1, sizeof(*ctx));
-	if (ctx == NULL) {
-		close(fd);
-		_log_error("Unable to allocate context data");
+	if (strncmp(port_path, "usb", 3) == 0) {
+		ctx->io = &usb_io_ops;
+	}
+	else {
+		ctx->io = &fd_io_ops;
+	}
+
+	if (ctx->io->open(&ctx->io_ctx, port_path) < 0) {
+		free(ctx);
 		return printer_status_error;
 	}
 
 	_log("Connected to port %s. Initializing protocol...", port_path);
 
-	/* Configure port in raw mode */
-	struct termios t;
-	if (tcgetattr(fd, &t) == 0) {
-		cfmakeraw(&t);
-		if (tcsetattr(fd, TCSANOW, &t) < 0) {
-			perror("Warning: Cannot set termios raw mode");
-		}
-	}
-
-	ctx->fd = fd;
 	p->private = ctx;
 
 	return printer_status_ok;
@@ -135,14 +127,16 @@ static int aiyin_open(printer_t *p, const char *port_path)
 
 static int aiyin_close(printer_t *p)
 {
-	struct aiyin_ctx *ctx = (struct aiyin_ctx *)p->private;
-
-	if (ctx == NULL || ctx->fd < 0) {
+	struct aiyin_ctx *ctx = p->private;
+	if (ctx == NULL) {
 		return printer_status_error;
 	}
 
-	close(ctx->fd);
-	ctx->fd = -1;
+	if (ctx->io && ctx->io->close) {
+		ctx->io->close(ctx->io_ctx);
+	}
+
+	ctx->io_ctx = NULL;
 
 	free(ctx);
 	p->private = NULL;
@@ -163,11 +157,11 @@ static int aiyin_status(printer_t *p, int *p_status)
 	int status = 0;
 
 	_log("Checking printer state...");
-	if (aiyin_send_command(ctx->fd, cmd_status, sizeof(cmd_status)) < 0) {
+	if (aiyin_send_command(ctx, cmd_status, sizeof(cmd_status)) < 0) {
 		return printer_status_error;
 	}
 
-	int len = aiyin_read_response(ctx->fd, resp, sizeof(resp), 2);
+	int len = aiyin_read_response(ctx, resp, sizeof(resp), 2);
 	if (len <= 0) {
 		_log_error("No status response from printer (Timeout).");
 		return printer_status_timeout;
@@ -212,16 +206,16 @@ static int aiyin_status(printer_t *p, int *p_status)
 	return status;
 }
 
-static int aiyin_send_config_cmd(int fd, const unsigned char *cmd, size_t size, const char *cmd_name)
+static int aiyin_send_config_cmd(struct aiyin_ctx *ctx, const unsigned char *cmd, size_t size, const char *cmd_name)
 {
 	unsigned char resp[16];
 	memset(resp, 0, sizeof(resp));
 
-	if (aiyin_send_command(fd, cmd, size) < 0) {
+	if (aiyin_send_command(ctx, cmd, size) < 0) {
 		return printer_status_error;
 	}
 
-	int len = aiyin_read_response(fd, resp, sizeof(resp), 2);
+	int len = aiyin_read_response(ctx, resp, sizeof(resp), 2);
 	if (len <= 0) {
 		_log_error("%s: no 'OK' response (Timeout)", cmd_name);
 		return printer_status_timeout;
@@ -252,7 +246,7 @@ static int aiyin_setup_density(printer_t *p, int density)
 	cmd_density[4] = density;
 	ctx->density_level = density;
 
-	return aiyin_send_config_cmd(ctx->fd, cmd_density, sizeof(cmd_density), "Density setup");
+	return aiyin_send_config_cmd(ctx, cmd_density, sizeof(cmd_density), "Density setup");
 }
 
 static int aiyin_setup_paper(printer_t *p, int paper_type)
@@ -272,7 +266,7 @@ static int aiyin_setup_paper(printer_t *p, int paper_type)
 	cmd_paper[3] = paper_type;
 	ctx->paper_type = paper_type;
 
-	return aiyin_send_config_cmd(ctx->fd, cmd_paper, sizeof(cmd_paper), "Paper type setup");
+	return aiyin_send_config_cmd(ctx, cmd_paper, sizeof(cmd_paper), "Paper type setup");
 }
 
 static int aiyin_set_property(printer_t *p, int key, int value)
@@ -295,10 +289,10 @@ static int aiyin_wakeup(printer_t *p)
 	}
 
 	unsigned char cmd_wakeup[12] = { 0 };
-	aiyin_send_command(ctx->fd, cmd_wakeup, sizeof(cmd_wakeup));
+	aiyin_send_command(ctx, cmd_wakeup, sizeof(cmd_wakeup));
 
 	unsigned char cmd_enable[] = { 0x10, 0xFF, 0xFE, 0x01 };
-	if (aiyin_send_command(ctx->fd, cmd_enable, sizeof(cmd_enable)) < 0) {
+	if (aiyin_send_command(ctx, cmd_enable, sizeof(cmd_enable)) < 0) {
 		return printer_status_error;
 	}
 
@@ -324,13 +318,13 @@ static int aiyin_send_image(printer_t *p, const unsigned char *bitmap_data, int 
 		height_pels & 0xFF, (height_pels >> 8) & 0xFF
 	};
 
-	if (aiyin_send_command(ctx->fd, img_header, sizeof(img_header)) < 0) {
+	if (aiyin_send_command(ctx, img_header, sizeof(img_header)) < 0) {
 		return printer_status_error;
 	}
 
 	size_t bitmap_size = (size_t)PRINTER_WIDTH_BYTES * (size_t)height_pels;
 	_log("Sending bitmap buffer (%zu bytes, height: %d)...", bitmap_size, height_pels);
-	if (aiyin_send_command(ctx->fd, bitmap_data, bitmap_size) < 0) {
+	if (aiyin_send_command(ctx, bitmap_data, bitmap_size) < 0) {
 		return printer_status_error;
 	}
 
@@ -346,7 +340,7 @@ static int aiyin_formfeed(printer_t *p)
 	}
 
 	unsigned char cmd_feed[] = { 0x1D, 0x0C };
-	if (aiyin_send_command(ctx->fd, cmd_feed, sizeof(cmd_feed)) < 0) {
+	if (aiyin_send_command(ctx, cmd_feed, sizeof(cmd_feed)) < 0) {
 		return printer_status_error;
 	}
 	return printer_status_ok;
@@ -362,14 +356,14 @@ static int aiyin_stop_wait(printer_t *p)
 
 	unsigned char cmd_stop[] = { 0x10, 0xFF, 0xFE, 0x45 };
 	_log("Triggering print mechanism. Waiting for completion signal...");
-	if (aiyin_send_command(ctx->fd, cmd_stop, sizeof(cmd_stop)) < 0) {
+	if (aiyin_send_command(ctx, cmd_stop, sizeof(cmd_stop)) < 0) {
 		return printer_status_error;
 	}
 
 	unsigned char final_resp[16];
 	memset(final_resp, 0, sizeof(final_resp));
 
-	int final_len = aiyin_read_response(ctx->fd, final_resp, sizeof(final_resp), 30);
+	int final_len = aiyin_read_response(ctx, final_resp, sizeof(final_resp), 30);
 
 	if (final_len > 0) {
 		if (final_resp[0] == 0xAA || strstr((char *)final_resp, "OK") != NULL) {

@@ -425,7 +425,7 @@ static void print_usage(const char *prog_name)
 	printf("USAGE\n");
 	printf("  %s [options]\n", prog_name);
 	printf("\nOPTIONS\n");
-	printf("  -d, --device <path>      RFCOMM device path (default: /dev/rfcomm0)\n");
+	printf("  -d, --device <path>      RFCOMM path (default: /dev/rfcomm0) or usb\n");
 	printf("  -m, --model <model>      Select printer model (1 - Fichero/AiYin D11s, 2 - Niimbot D11,D110)\n");
 	printf("  -f, --font <path>        Path to PCF font\n");
 	printf("  -t, --text <text>        Print formated text label (\\a-center \\f-left \\r-right \\b-bold toggle \\n-newline)\n");
