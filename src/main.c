@@ -25,9 +25,9 @@
 #include "printer.h"
 #include "font_pcf.h"
 
-/* LABEL_WIDTH:HEIGHT is 90deg CCW against FICHERO_WIDTH:HEIGHT */
-#define LABEL_WIDTH  (FICHERO_DEFAULT_HEIGHT_PELS)
-#define LABEL_HEIGHT (FICHERO_WIDTH_PELS)
+/* LABEL_WIDTH:HEIGHT is 90deg CCW against PRINTER_WIDTH:HEIGHT */
+#define LABEL_WIDTH  (PRINTER_DEFAULT_HEIGHT_PELS)
+#define LABEL_HEIGHT (PRINTER_WIDTH_PELS)
 
 void unescape_string(char *str)
 {
@@ -148,11 +148,11 @@ static unsigned char *load_pbm_file(const char *filename, int *out_height)
 		return NULL;
 	}
 
-	if (width != FICHERO_WIDTH_BYTES * 8) {
-		fprintf(stderr, "Warning: PBM width is %d pixels, printer expects exactly %d pixels\n", width, FICHERO_WIDTH_BYTES * 8);
+	if (width != PRINTER_WIDTH_BYTES * 8) {
+		fprintf(stderr, "Warning: PBM width is %d pixels, printer expects exactly %d pixels\n", width, PRINTER_WIDTH_BYTES * 8);
 	}
 
-	size_t bitmap_size = FICHERO_WIDTH_BYTES * height;
+	size_t bitmap_size = PRINTER_WIDTH_BYTES * height;
 	unsigned char *bitmap_data = (unsigned char *)calloc(1, bitmap_size);
 	if (bitmap_data == NULL) {
 		perror("Failed to allocate bitmap memory for PBM");
@@ -171,7 +171,7 @@ static unsigned char *load_pbm_file(const char *filename, int *out_height)
 				return NULL;
 			}
 			if (val != 0) {
-				int byte_idx = y * FICHERO_WIDTH_BYTES + (x >> 3);
+				int byte_idx = y * PRINTER_WIDTH_BYTES + (x >> 3);
 				int bit_idx = ~x & 7;
 				bitmap_data[byte_idx] |= (1 << bit_idx);
 			}
@@ -186,20 +186,20 @@ static unsigned char *load_pbm_file(const char *filename, int *out_height)
 /* Generate test pattern: grid every 4 pixels + border */
 static unsigned char *generate_test_pattern(int height_pels)
 {
-	size_t bitmap_size = FICHERO_WIDTH_BYTES * height_pels;
+	size_t bitmap_size = PRINTER_WIDTH_BYTES * height_pels;
 	unsigned char *bitmap_data = (unsigned char *)calloc(1, bitmap_size);
 	if (bitmap_data == NULL) {
 		perror("Failed to allocate test pattern memory");
 		return NULL;
 	}
 
-	int width_pels = FICHERO_WIDTH_BYTES * 8;
+	int width_pels = PRINTER_WIDTH_BYTES * 8;
 	for (int y = 0; y < height_pels; y++) {
 		for (int x = 0; x < width_pels; x++) {
 			bool is_border = (y == 0 || y == height_pels - 1 || x == 0 || x == width_pels - 1);
 			bool is_grid = ((x & 3) == 0 || (y & 3) == 0);
 			if (is_border || is_grid) {
-				int byte_idx = y * FICHERO_WIDTH_BYTES + (x >> 3);
+				int byte_idx = y * PRINTER_WIDTH_BYTES + (x >> 3);
 				int bit_idx = ~x & 7;
 				bitmap_data[byte_idx] |= (1 << bit_idx);
 			}
@@ -252,7 +252,7 @@ static unsigned char *build_text_bitmap(const char *text_str, const char *font_p
 	int width = LABEL_HEIGHT;
 	*out_height_pels = LABEL_WIDTH;
 
-	size_t bitmap_size = FICHERO_WIDTH_BYTES * height;
+	size_t bitmap_size = PRINTER_WIDTH_BYTES * height;
 	unsigned char *bitmap_data = (unsigned char *)calloc(1, bitmap_size);
 	if (bitmap_data == NULL) {
 		free(label_buf);
@@ -264,7 +264,7 @@ static unsigned char *build_text_bitmap(const char *text_str, const char *font_p
 		for (int x = 0; x < width; x++) {
 			int pixel = label_buf[LABEL_WIDTH * (width - x - 1) + y];
 			if (pixel == 0) {
-				int byte_idx = y * FICHERO_WIDTH_BYTES + (x >> 3);
+				int byte_idx = y * PRINTER_WIDTH_BYTES + (x >> 3);
 				int bit_idx = ~x & 7;
 				bitmap_data[byte_idx] |= (1 << bit_idx);
 			}
@@ -354,7 +354,7 @@ static unsigned char *build_datamatrix_bitmap(const char *text_str, int *out_hei
 	int width = LABEL_HEIGHT;
 	*out_height_pels = LABEL_WIDTH;
 
-	size_t bitmap_size = FICHERO_WIDTH_BYTES * height;
+	size_t bitmap_size = PRINTER_WIDTH_BYTES * height;
 	unsigned char *bitmap_data = (unsigned char *)calloc(1, bitmap_size);
 	if (bitmap_data == NULL) {
 		free(label_buf);
@@ -366,7 +366,7 @@ static unsigned char *build_datamatrix_bitmap(const char *text_str, int *out_hei
 		for (int x = 0; x < width; x++) {
 			int pixel = label_buf[LABEL_WIDTH * (width - x - 1) + y];
 			if (pixel == 0) {
-				int byte_idx = y * FICHERO_WIDTH_BYTES + (x >> 3);
+				int byte_idx = y * PRINTER_WIDTH_BYTES + (x >> 3);
 				int bit_idx = ~x & 7;
 				bitmap_data[byte_idx] |= (1 << bit_idx);
 			}
@@ -383,7 +383,7 @@ static bool print_preview(const unsigned char *bitmap_data, int height_pels)
 	for (int y = 0; y < height_pels; y++) {
 		printf("|");
 		for (int x = 0; x < 96; x++) {
-			int byte_idx = y * FICHERO_WIDTH_BYTES + (x >> 3);
+			int byte_idx = y * PRINTER_WIDTH_BYTES + (x >> 3);
 			int bit_idx = ~x & 7;
 			if (bitmap_data[byte_idx] & (1 << bit_idx)) {
 				printf("#");
@@ -410,14 +410,14 @@ static void get_default_font_path(char *buf, size_t bufsiz, const char *argv0)
 	if (len != -1) {
 		exe_path[len] = '\0';
 		char *dir = dirname(exe_path);
-		snprintf(buf, bufsiz, "%s/fonts/fichero.pcf", dir);
+		snprintf(buf, bufsiz, "%s/fonts/default.pcf", dir);
 		if (access(buf, R_OK) == 0) {
 			return;
 		}
 	}
 
 	/* Fallback to relative path */
-	snprintf(buf, bufsiz, "fonts/fichero.pcf");
+	snprintf(buf, bufsiz, "fonts/default.pcf");
 }
 
 static void print_usage(const char *prog_name)
@@ -426,7 +426,7 @@ static void print_usage(const char *prog_name)
 	printf("  %s [options]\n", prog_name);
 	printf("\nOPTIONS\n");
 	printf("  -d, --device <path>      RFCOMM device path (default: /dev/rfcomm0)\n");
-	printf("  -m, --model <model>      Select printer model (1 - fichero D11s, 2 - niimbot D11,D110)\n");
+	printf("  -m, --model <model>      Select printer model (1 - Fichero/AiYin D11s, 2 - Niimbot D11,D110)\n");
 	printf("  -f, --font <path>        Path to PCF font\n");
 	printf("  -t, --text <text>        Print formated text label (\\a-center \\f-left \\r-right \\b-bold toggle \\n-newline)\n");
 	printf("  -b, --datamatrix <text>  Print Data Matrix encoding text value\n");
@@ -535,11 +535,11 @@ int main(int argc, char **argv)
 	printer_t p = { 0 };
 	int ret = EXIT_FAILURE;
 
-	int height_pels = FICHERO_DEFAULT_HEIGHT_PELS;
+	int height_pels = PRINTER_DEFAULT_HEIGHT_PELS;
 	unsigned char *bitmap_data = NULL;
 
 	switch (printer_model) {
-		case 1: printer_init(&p, &printer_ops_fichero); break;
+		case 1: printer_init(&p, &printer_ops_aiyin); break;
 		case 2: printer_init(&p, &printer_ops_niimbot); break;
 		default: break;
 	}

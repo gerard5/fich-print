@@ -14,7 +14,7 @@
 
 #include "printer.h"
 
-#define _log_prefix          "fichero: "
+#define _log_prefix          "aiyin: "
 #define _log(fmt, ...)       printf(_log_prefix fmt "\n", ##__VA_ARGS__)
 #define _log_error(fmt, ...) fprintf(stderr, _log_prefix "Error: " fmt "\n", ##__VA_ARGS__)
 
@@ -24,14 +24,14 @@
 #define CHECK_WOULD_BLOCK(e) ((e) == EAGAIN)
 #endif
 
-struct fichero_ctx {
+struct aiyin_ctx {
 	int fd;
 	int density_level;
 	int paper_type;
 };
 
 /* Helper function: safe write to the printer handling EINTR and partial writes */
-static int fichero_send_command(int fd, const unsigned char *cmd, size_t size)
+static int aiyin_send_command(int fd, const unsigned char *cmd, size_t size)
 {
 	size_t written = 0;
 	while (written < size) {
@@ -49,7 +49,7 @@ static int fichero_send_command(int fd, const unsigned char *cmd, size_t size)
 }
 
 /* Helper function: read from port with timeout in seconds handling EINTR */
-static int fichero_read_response(int fd, unsigned char *buffer, size_t max_len, int timeout_sec)
+static int aiyin_read_response(int fd, unsigned char *buffer, size_t max_len, int timeout_sec)
 {
 	size_t total_bytes = 0;
 	fd_set set;
@@ -101,7 +101,7 @@ static int fichero_read_response(int fd, unsigned char *buffer, size_t max_len, 
 	return (int)total_bytes;
 }
 
-static int fichero_open(printer_t *p, const char *port_path)
+static int aiyin_open(printer_t *p, const char *port_path)
 {
 	int fd = open(port_path, O_RDWR | O_NOCTTY);
 	if (fd < 0) {
@@ -109,7 +109,7 @@ static int fichero_open(printer_t *p, const char *port_path)
 		return printer_status_error;
 	}
 
-	struct fichero_ctx *ctx = calloc(1, sizeof(*ctx));
+	struct aiyin_ctx *ctx = calloc(1, sizeof(*ctx));
 	if (ctx == NULL) {
 		close(fd);
 		_log_error("Unable to allocate context data");
@@ -133,9 +133,9 @@ static int fichero_open(printer_t *p, const char *port_path)
 	return printer_status_ok;
 }
 
-static int fichero_close(printer_t *p)
+static int aiyin_close(printer_t *p)
 {
-	struct fichero_ctx *ctx = (struct fichero_ctx *)p->private;
+	struct aiyin_ctx *ctx = (struct aiyin_ctx *)p->private;
 
 	if (ctx == NULL || ctx->fd < 0) {
 		return printer_status_error;
@@ -150,9 +150,9 @@ static int fichero_close(printer_t *p)
 	return printer_status_ok;
 }
 
-static int fichero_status(printer_t *p, int *p_status)
+static int aiyin_status(printer_t *p, int *p_status)
 {
-	struct fichero_ctx *ctx = (struct fichero_ctx *)p->private;
+	struct aiyin_ctx *ctx = (struct aiyin_ctx *)p->private;
 
 	if (ctx == NULL) {
 		return printer_status_error;
@@ -163,11 +163,11 @@ static int fichero_status(printer_t *p, int *p_status)
 	int status = 0;
 
 	_log("Checking printer state...");
-	if (fichero_send_command(ctx->fd, cmd_status, sizeof(cmd_status)) < 0) {
+	if (aiyin_send_command(ctx->fd, cmd_status, sizeof(cmd_status)) < 0) {
 		return printer_status_error;
 	}
 
-	int len = fichero_read_response(ctx->fd, resp, sizeof(resp), 2);
+	int len = aiyin_read_response(ctx->fd, resp, sizeof(resp), 2);
 	if (len <= 0) {
 		_log_error("No status response from printer (Timeout).");
 		return printer_status_timeout;
@@ -212,16 +212,16 @@ static int fichero_status(printer_t *p, int *p_status)
 	return status;
 }
 
-static int fichero_send_config_cmd(int fd, const unsigned char *cmd, size_t size, const char *cmd_name)
+static int aiyin_send_config_cmd(int fd, const unsigned char *cmd, size_t size, const char *cmd_name)
 {
 	unsigned char resp[16];
 	memset(resp, 0, sizeof(resp));
 
-	if (fichero_send_command(fd, cmd, size) < 0) {
+	if (aiyin_send_command(fd, cmd, size) < 0) {
 		return printer_status_error;
 	}
 
-	int len = fichero_read_response(fd, resp, sizeof(resp), 2);
+	int len = aiyin_read_response(fd, resp, sizeof(resp), 2);
 	if (len <= 0) {
 		_log_error("%s: no 'OK' response (Timeout)", cmd_name);
 		return printer_status_timeout;
@@ -235,9 +235,9 @@ static int fichero_send_config_cmd(int fd, const unsigned char *cmd, size_t size
 	return printer_status_error;
 }
 
-static int fichero_setup_density(printer_t *p, int density)
+static int aiyin_setup_density(printer_t *p, int density)
 {
-	struct fichero_ctx *ctx = (struct fichero_ctx *)p->private;
+	struct aiyin_ctx *ctx = (struct aiyin_ctx *)p->private;
 
 	if (ctx == NULL) {
 		return printer_status_error;
@@ -252,12 +252,12 @@ static int fichero_setup_density(printer_t *p, int density)
 	cmd_density[4] = density;
 	ctx->density_level = density;
 
-	return fichero_send_config_cmd(ctx->fd, cmd_density, sizeof(cmd_density), "Density setup");
+	return aiyin_send_config_cmd(ctx->fd, cmd_density, sizeof(cmd_density), "Density setup");
 }
 
-static int fichero_setup_paper(printer_t *p, int paper_type)
+static int aiyin_setup_paper(printer_t *p, int paper_type)
 {
-	struct fichero_ctx *ctx = (struct fichero_ctx *)p->private;
+	struct aiyin_ctx *ctx = (struct aiyin_ctx *)p->private;
 
 	if (ctx == NULL) {
 		return printer_status_error;
@@ -272,89 +272,89 @@ static int fichero_setup_paper(printer_t *p, int paper_type)
 	cmd_paper[3] = paper_type;
 	ctx->paper_type = paper_type;
 
-	return fichero_send_config_cmd(ctx->fd, cmd_paper, sizeof(cmd_paper), "Paper type setup");
+	return aiyin_send_config_cmd(ctx->fd, cmd_paper, sizeof(cmd_paper), "Paper type setup");
 }
 
-static int fichero_set_property(printer_t *p, int key, int value)
+static int aiyin_set_property(printer_t *p, int key, int value)
 {
 	switch (key) {
-		case printer_prop_density: return fichero_setup_density(p, value);
-		case printer_prop_paper: return fichero_setup_paper(p, value);
+		case printer_prop_density: return aiyin_setup_density(p, value);
+		case printer_prop_paper: return aiyin_setup_paper(p, value);
 		default: break;
 	}
 
 	return printer_status_error;
 }
 
-static int fichero_wakeup(printer_t *p)
+static int aiyin_wakeup(printer_t *p)
 {
-	struct fichero_ctx *ctx = (struct fichero_ctx *)p->private;
+	struct aiyin_ctx *ctx = (struct aiyin_ctx *)p->private;
 
 	if (ctx == NULL) {
 		return printer_status_error;
 	}
 
 	unsigned char cmd_wakeup[12] = { 0 };
-	fichero_send_command(ctx->fd, cmd_wakeup, sizeof(cmd_wakeup));
+	aiyin_send_command(ctx->fd, cmd_wakeup, sizeof(cmd_wakeup));
 
 	unsigned char cmd_enable[] = { 0x10, 0xFF, 0xFE, 0x01 };
-	if (fichero_send_command(ctx->fd, cmd_enable, sizeof(cmd_enable)) < 0) {
+	if (aiyin_send_command(ctx->fd, cmd_enable, sizeof(cmd_enable)) < 0) {
 		return printer_status_error;
 	}
 
 	return printer_status_ok;
 }
 
-static int fichero_send_image(printer_t *p, const unsigned char *bitmap_data, int height_pels)
+static int aiyin_send_image(printer_t *p, const unsigned char *bitmap_data, int height_pels)
 {
-	struct fichero_ctx *ctx = (struct fichero_ctx *)p->private;
+	struct aiyin_ctx *ctx = (struct aiyin_ctx *)p->private;
 
 	if (ctx == NULL) {
 		return printer_status_error;
 	}
 
 	if (height_pels <= 0) {
-		height_pels = FICHERO_DEFAULT_HEIGHT_PELS;
+		height_pels = PRINTER_DEFAULT_HEIGHT_PELS;
 	}
 
 	/* Raster image header: 1D 76 30 mm xL xH yL yH */
 	unsigned char img_header[] = {
 		0x1D, 0x76, 0x30, 0x00,
-		FICHERO_WIDTH_BYTES & 0xFF, (FICHERO_WIDTH_BYTES >> 8) & 0xFF,
+		PRINTER_WIDTH_BYTES & 0xFF, (PRINTER_WIDTH_BYTES >> 8) & 0xFF,
 		height_pels & 0xFF, (height_pels >> 8) & 0xFF
 	};
 
-	if (fichero_send_command(ctx->fd, img_header, sizeof(img_header)) < 0) {
+	if (aiyin_send_command(ctx->fd, img_header, sizeof(img_header)) < 0) {
 		return printer_status_error;
 	}
 
-	size_t bitmap_size = (size_t)FICHERO_WIDTH_BYTES * (size_t)height_pels;
+	size_t bitmap_size = (size_t)PRINTER_WIDTH_BYTES * (size_t)height_pels;
 	_log("Sending bitmap buffer (%zu bytes, height: %d)...", bitmap_size, height_pels);
-	if (fichero_send_command(ctx->fd, bitmap_data, bitmap_size) < 0) {
+	if (aiyin_send_command(ctx->fd, bitmap_data, bitmap_size) < 0) {
 		return printer_status_error;
 	}
 
 	return printer_status_ok;
 }
 
-static int fichero_formfeed(printer_t *p)
+static int aiyin_formfeed(printer_t *p)
 {
-	struct fichero_ctx *ctx = (struct fichero_ctx *)p->private;
+	struct aiyin_ctx *ctx = (struct aiyin_ctx *)p->private;
 
 	if (ctx == NULL) {
 		return printer_status_error;
 	}
 
 	unsigned char cmd_feed[] = { 0x1D, 0x0C };
-	if (fichero_send_command(ctx->fd, cmd_feed, sizeof(cmd_feed)) < 0) {
+	if (aiyin_send_command(ctx->fd, cmd_feed, sizeof(cmd_feed)) < 0) {
 		return printer_status_error;
 	}
 	return printer_status_ok;
 }
 
-static int fichero_stop_wait(printer_t *p)
+static int aiyin_stop_wait(printer_t *p)
 {
-	struct fichero_ctx *ctx = (struct fichero_ctx *)p->private;
+	struct aiyin_ctx *ctx = (struct aiyin_ctx *)p->private;
 
 	if (ctx == NULL) {
 		return printer_status_error;
@@ -362,14 +362,14 @@ static int fichero_stop_wait(printer_t *p)
 
 	unsigned char cmd_stop[] = { 0x10, 0xFF, 0xFE, 0x45 };
 	_log("Triggering print mechanism. Waiting for completion signal...");
-	if (fichero_send_command(ctx->fd, cmd_stop, sizeof(cmd_stop)) < 0) {
+	if (aiyin_send_command(ctx->fd, cmd_stop, sizeof(cmd_stop)) < 0) {
 		return printer_status_error;
 	}
 
 	unsigned char final_resp[16];
 	memset(final_resp, 0, sizeof(final_resp));
 
-	int final_len = fichero_read_response(ctx->fd, final_resp, sizeof(final_resp), 30);
+	int final_len = aiyin_read_response(ctx->fd, final_resp, sizeof(final_resp), 30);
 
 	if (final_len > 0) {
 		if (final_resp[0] == 0xAA || strstr((char *)final_resp, "OK") != NULL) {
@@ -389,13 +389,13 @@ static int fichero_stop_wait(printer_t *p)
 	return printer_status_error;
 }
 
-const struct printer_ops printer_ops_fichero = {
-	.open = fichero_open,
-	.close = fichero_close,
-	.status = fichero_status,
-	.set_property = fichero_set_property,
-	.wakeup = fichero_wakeup,
-	.send_image = fichero_send_image,
-	.formfeed = fichero_formfeed,
-	.stop_wait = fichero_stop_wait,
+const struct printer_ops printer_ops_aiyin = {
+	.open = aiyin_open,
+	.close = aiyin_close,
+	.status = aiyin_status,
+	.set_property = aiyin_set_property,
+	.wakeup = aiyin_wakeup,
+	.send_image = aiyin_send_image,
+	.formfeed = aiyin_formfeed,
+	.stop_wait = aiyin_stop_wait,
 };

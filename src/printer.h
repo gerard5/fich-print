@@ -9,9 +9,9 @@
 #include <stdbool.h>
 #include <stddef.h>
 
-#define FICHERO_WIDTH_PELS          96
-#define FICHERO_WIDTH_BYTES         12
-#define FICHERO_DEFAULT_HEIGHT_PELS 224
+#define PRINTER_WIDTH_PELS          96
+#define PRINTER_WIDTH_BYTES         12
+#define PRINTER_DEFAULT_HEIGHT_PELS 224
 
 enum printer_status {
 	printer_status_ok = 0,
@@ -76,7 +76,7 @@ int printer_stop_wait(printer_t *p);
 
 int printer_print_label(printer_t *p, const printer_config_t *config, const unsigned char *bitmap_data, int height_pels);
 
-extern const struct printer_ops printer_ops_fichero;
+extern const struct printer_ops printer_ops_aiyin;
 extern const struct printer_ops printer_ops_niimbot;
 
 #endif /* FICHERO_H */

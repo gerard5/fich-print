@@ -1,6 +1,8 @@
 /*
  * Experimental Niimbot D11 thermal printer protocol implementation
  * Copyright 2026, Gerard Świderski
+ *
+ * Reference: https://printers.niim.blue/interfacing/proto/
  */
 
 #include <stdio.h>
@@ -508,7 +510,7 @@ static int niimbot_send_image(struct printer *p, const unsigned char *bitmap_dat
 	}
 
 	if (height_pels <= 0) {
-		height_pels = FICHERO_DEFAULT_HEIGHT_PELS;
+		height_pels = PRINTER_DEFAULT_HEIGHT_PELS;
 	}
 
 	/*
@@ -567,10 +569,10 @@ static int niimbot_send_image(struct printer *p, const unsigned char *bitmap_dat
 
 	/* Transmitting bitmap rows */
 	for (int y = 0; y < height_pels; y++) {
-		const unsigned char *current_row_ptr = &bitmap_data[y * FICHERO_WIDTH_BYTES];
+		const unsigned char *current_row_ptr = &bitmap_data[y * PRINTER_WIDTH_BYTES];
 
 		bool is_row_empty = true;
-		for (int b = 0; b < FICHERO_WIDTH_BYTES; b++) {
+		for (int b = 0; b < PRINTER_WIDTH_BYTES; b++) {
 			if (current_row_ptr[b] != 0x00) {
 				is_row_empty = false;
 				break;
@@ -589,7 +591,7 @@ static int niimbot_send_image(struct printer *p, const unsigned char *bitmap_dat
 		}
 		else {
 			/* Data line (0x85). Payload: [y_H][y_L] [C1][C2][C3] [NN=1] [12B data] -> 18 bytes */
-			uint32_t black_pixels = count_black_pixels(current_row_ptr, FICHERO_WIDTH_BYTES);
+			uint32_t black_pixels = count_black_pixels(current_row_ptr, PRINTER_WIDTH_BYTES);
 			pkt[0] = (unsigned char)((y >> 8) & 0xFF);
 			pkt[1] = (unsigned char)(y & 0xFF);
 			pkt[2] = (unsigned char)((black_pixels >> 16) & 0xFF);
@@ -597,7 +599,7 @@ static int niimbot_send_image(struct printer *p, const unsigned char *bitmap_dat
 			pkt[4] = (unsigned char)(black_pixels & 0xFF);
 			pkt[5] = 1;
 
-			memcpy(&pkt[6], current_row_ptr, FICHERO_WIDTH_BYTES);
+			memcpy(&pkt[6], current_row_ptr, PRINTER_WIDTH_BYTES);
 
 			if (niimbot_send_packet(ctx->fd, NIIMBOT_CMD_BITMAP_ROW, pkt, 18) < 0) {
 				return printer_status_error;
