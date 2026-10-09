@@ -21,7 +21,8 @@
 #include <libgen.h>
 
 #include <dmtx.h>
-#include "fichero.h"
+
+#include "printer.h"
 #include "font_pcf.h"
 
 /* LABEL_WIDTH:HEIGHT is 90deg CCW against FICHERO_WIDTH:HEIGHT */
@@ -169,9 +170,9 @@ static unsigned char *load_pbm_file(const char *filename, int *out_height)
 				fclose(f);
 				return NULL;
 			}
-			if (val) {
-				int byte_idx = y * FICHERO_WIDTH_BYTES + (x / 8);
-				int bit_idx = 7 - (x % 8);
+			if (val != 0) {
+				int byte_idx = y * FICHERO_WIDTH_BYTES + (x >> 3);
+				int bit_idx = ~x & 7;
 				bitmap_data[byte_idx] |= (1 << bit_idx);
 			}
 		}
@@ -196,10 +197,10 @@ static unsigned char *generate_test_pattern(int height_pels)
 	for (int y = 0; y < height_pels; y++) {
 		for (int x = 0; x < width_pels; x++) {
 			bool is_border = (y == 0 || y == height_pels - 1 || x == 0 || x == width_pels - 1);
-			bool is_grid = (x % 4 == 0 || y % 4 == 0);
+			bool is_grid = ((x & 3) == 0 || (y & 3) == 0);
 			if (is_border || is_grid) {
-				int byte_idx = y * FICHERO_WIDTH_BYTES + (x / 8);
-				int bit_idx = 7 - (x % 8);
+				int byte_idx = y * FICHERO_WIDTH_BYTES + (x >> 3);
+				int bit_idx = ~x & 7;
 				bitmap_data[byte_idx] |= (1 << bit_idx);
 			}
 		}
@@ -219,6 +220,7 @@ static unsigned char *build_text_bitmap(const char *text_str, const char *font_p
 	static gplane_t label_plane;
 	uint8_t *label_buf = malloc(LABEL_WIDTH * LABEL_HEIGHT * sizeof(uint8_t));
 	if (label_buf == NULL) {
+		free_pcf(-1);
 		perror("Failed to allocate bitmap memory for label");
 		return NULL;
 	}
@@ -262,8 +264,8 @@ static unsigned char *build_text_bitmap(const char *text_str, const char *font_p
 		for (int x = 0; x < width; x++) {
 			int pixel = label_buf[LABEL_WIDTH * (width - x - 1) + y];
 			if (pixel == 0) {
-				int byte_idx = y * FICHERO_WIDTH_BYTES + (x / 8);
-				int bit_idx = 7 - (x % 8);
+				int byte_idx = y * FICHERO_WIDTH_BYTES + (x >> 3);
+				int bit_idx = ~x & 7;
 				bitmap_data[byte_idx] |= (1 << bit_idx);
 			}
 		}
@@ -364,8 +366,8 @@ static unsigned char *build_datamatrix_bitmap(const char *text_str, int *out_hei
 		for (int x = 0; x < width; x++) {
 			int pixel = label_buf[LABEL_WIDTH * (width - x - 1) + y];
 			if (pixel == 0) {
-				int byte_idx = y * FICHERO_WIDTH_BYTES + (x / 8);
-				int bit_idx = 7 - (x % 8);
+				int byte_idx = y * FICHERO_WIDTH_BYTES + (x >> 3);
+				int bit_idx = ~x & 7;
 				bitmap_data[byte_idx] |= (1 << bit_idx);
 			}
 		}
@@ -381,8 +383,8 @@ static bool print_preview(const unsigned char *bitmap_data, int height_pels)
 	for (int y = 0; y < height_pels; y++) {
 		printf("|");
 		for (int x = 0; x < 96; x++) {
-			int byte_idx = y * FICHERO_WIDTH_BYTES + (x / 8);
-			int bit_idx = 7 - (x % 8);
+			int byte_idx = y * FICHERO_WIDTH_BYTES + (x >> 3);
+			int bit_idx = ~x & 7;
 			if (bitmap_data[byte_idx] & (1 << bit_idx)) {
 				printf("#");
 			}
@@ -424,30 +426,32 @@ static void print_usage(const char *prog_name)
 	printf("  %s [options]\n", prog_name);
 	printf("\nOPTIONS\n");
 	printf("  -d <dev/path> RFCOMM device path (default: /dev/rfcomm0)\n");
+	printf("  -m <model>    Select printer model (1 - fichero D11s, 2 - niimbot D11,D110)\n");
 	printf("  -i <file>     Load input from PBM (P1) file\n");
-	printf("  -D <density>  Set density 0-2 (default: 1)\n");
+	printf("  -D <density>  Set density level 0-2 (default: 1)\n");
 	printf("  -p <type>     Paper type: 0=gap, 1=black_mark, 2=continuous (default: 0)\n");
-	printf("  -t <text>     Label text (format \\a-center \\f-left \\r-right \\b-bold toggle \\n-newline)\n");
-	printf("  -f <font>     path to pcf font\n");
+	printf("  -t <text>     Label text (format \\a-center \\f-left \\r-right \\b-bold toggle)\n");
+	printf("  -f <font>     path to bdf font\n");
 	printf("  -b <text>     Generate datamatrix code\n");
 	printf("  -s            Preview before print\n");
 	printf("  -h            Show this help message\n");
 	printf("\nEXAMPLE\n");
 	printf("  sudo rfcomm connect 0 12:0F:F1:CE:C0:DE 1\n");
-	printf("  %s -d /dev/rfcomm0 -D 2 -s -t 'hello'\n", prog_name);
+	printf("  %s -m1 -d /dev/rfcomm0 -D2 -s -t 'hello'\n", prog_name);
 	printf("\n");
 }
 
 int main(int argc, char **argv)
 {
+
 	const char *port_path = "/dev/rfcomm0";
 	const char *pbm_filename = NULL;
 	const char *text_str = NULL;
 	const char *dmtx_str = NULL;
 	char font_path_buf[1024];
 	const char *font_path = NULL;
-	int density = 1;
-	int paper_type = fichero_paper_gap;
+	printer_config_t printer_cfg = { .density_level = 1, .paper_type = printer_paper_gap };
+	int printer_model = 0;
 	int preview = 0;
 
 	if (argc < 2) {
@@ -456,19 +460,22 @@ int main(int argc, char **argv)
 	}
 
 	int opt;
-	while ((opt = getopt(argc, argv, "d:i:D:p:t:f:b:sh")) != -1) {
+	while ((opt = getopt(argc, argv, "d:m:i:D:p:t:f:b:sh")) != -1) {
 		switch (opt) {
 			case 'd':
 				port_path = optarg;
+				break;
+			case 'm':
+				printer_model = atoi(optarg);
 				break;
 			case 'i':
 				pbm_filename = optarg;
 				break;
 			case 'D':
-				density = atoi(optarg);
+				printer_cfg.density_level = atoi(optarg);
 				break;
 			case 'p':
-				paper_type = atoi(optarg);
+				printer_cfg.paper_type = atoi(optarg);
 				break;
 			case 't':
 				text_str = optarg;
@@ -494,88 +501,72 @@ int main(int argc, char **argv)
 		}
 	}
 
-	if (font_path == NULL) {
-		get_default_font_path(font_path_buf, sizeof(font_path_buf), argv[0]);
-		font_path = font_path_buf;
-	}
-
-	fichero_t p = { 0 };
+	printer_t p = { 0 };
 	int ret = EXIT_FAILURE;
 
 	int height_pels = FICHERO_DEFAULT_HEIGHT_PELS;
 	unsigned char *bitmap_data = NULL;
 
+	switch (printer_model) {
+		case 1: printer_init(&p, &printer_ops_fichero); break;
+		case 2: printer_init(&p, &printer_ops_niimbot); break;
+		default: break;
+	}
+
+	if (!printer_validate(&p)) {
+		fprintf(stderr, "No valid printel model was selected\n");
+		return EXIT_FAILURE;
+	}
+
+	if (font_path == NULL) {
+		get_default_font_path(font_path_buf, sizeof(font_path_buf), argv[0]);
+		font_path = font_path_buf;
+	}
+
 	if (pbm_filename != NULL) {
 		bitmap_data = load_pbm_file(pbm_filename, &height_pels);
 		if (bitmap_data == NULL) {
-			goto onError;
+			return EXIT_FAILURE;
 		}
 	}
 	else if (text_str != NULL) {
 		bitmap_data = build_text_bitmap(text_str, font_path, &height_pels);
 		if (bitmap_data == NULL) {
-			goto onError;
+			return EXIT_FAILURE;
 		}
 	}
 	else if (dmtx_str != NULL) {
 		bitmap_data = build_datamatrix_bitmap(dmtx_str, &height_pels);
 		if (bitmap_data == NULL) {
-			goto onError;
+			return EXIT_FAILURE;
 		}
 	}
 	else {
 		bitmap_data = generate_test_pattern(height_pels);
 		if (bitmap_data == NULL) {
-			goto onError;
+			return EXIT_FAILURE;
 		}
 	}
 
-	if (preview != 0) {
-		if (!print_preview(bitmap_data, height_pels)) {
-			goto onError;
+	do {
+		if (preview != 0) {
+			if (!print_preview(bitmap_data, height_pels)) {
+				break;
+			}
 		}
-	}
 
-	printer_init(&p, &printer_ops_fichero);
-	/* WIP: printer_init(&p, &printer_ops_niimbot); */
+		if (printer_open(&p, port_path) != printer_status_ok) {
+			break;
+		}
 
-	if (printer_open(&p, port_path) < 0) {
-		goto onError;
-	}
+		if (printer_print_label(&p, &printer_cfg, bitmap_data, height_pels) != printer_status_ok) {
+			break;
+		}
 
-	if (printer_status(&p, NULL) < 0) {
-		goto onError;
-	}
+		ret = EXIT_SUCCESS;
+	} while (0);
 
-	if (printer_setup_density(&p, density) < 0) {
-		goto onError;
-	}
-
-	if (printer_setup_paper(&p, paper_type) < 0) {
-		goto onError;
-	}
-
-	if (printer_wakeup(&p) < 0) {
-		goto onError;
-	}
-
-	if (printer_image(&p, bitmap_data, height_pels) < 0) {
-		goto onError;
-	}
-
-	if (printer_formfeed(&p) < 0) {
-		goto onError;
-	}
-
-	if (printer_stop_wait(&p) < 0) {
-		goto onError;
-	}
-
-	ret = EXIT_SUCCESS;
-
-onError:
 	free(bitmap_data);
-
 	printer_close(&p);
 
 	return ret;

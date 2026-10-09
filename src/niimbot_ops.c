@@ -13,7 +13,7 @@
 #include <sys/select.h>
 #include <termios.h>
 
-#include "fichero.h"
+#include "printer.h"
 
 #define NIIMBOT_PKG_START 0x55
 #define NIIMBOT_PKG_END   0xAA
@@ -27,10 +27,11 @@
 #define NIIMBOT_CMD_END     0x15
 
 struct niimbot_ctx {
+	int fd;
 	uint16_t tx_seq;
 };
 
-static struct niimbot_ctx niimbot_ctx = { 0 };
+static struct niimbot_ctx niimbot_ctx = { 0 }; /* FIXME: alloc dynamicaly */
 
 static int niimbot_send_raw(int fd, const unsigned char *cmd, size_t size)
 {
@@ -112,7 +113,7 @@ static int niimbot_send_packet(int fd, uint8_t cmd, const uint8_t *data, uint8_t
 		return -1;
 	}
 
-	usleep(1500); /* Małe opóźnienie dla stabilizacji kontrolera drukarki */
+	usleep(1500);
 	return 0;
 }
 
@@ -157,18 +158,14 @@ static int niimbot_read_packet(int fd, uint8_t expected_cmd, unsigned char *data
 	return (int)data_len;
 }
 
-static int niimbot_open(fichero_t *p, const char *port_path)
+static int niimbot_open(printer_t *p, const char *port_path)
 {
 	int fd;
-
-	if (p->opened) {
-		return 0;
-	}
 
 	fd = open(port_path, O_RDWR | O_NOCTTY);
 	if (fd < 0) {
 		perror("Cannot open Niimbot RFCOMM port");
-		return -1;
+		return printer_status_error;
 	}
 	printf("Connected to Niimbot port %s. Executing handshake...\n", port_path);
 
@@ -182,52 +179,61 @@ static int niimbot_open(fichero_t *p, const char *port_path)
 
 	/* Handshake: CONNECT (0x01) client version 0x01 */
 	uint8_t client_ver = 0x01;
-	if (niimbot_send_packet(p->fd, NIIMBOT_CMD_CONNECT, &client_ver, 1) < 0) {
+	if (niimbot_send_packet(fd, NIIMBOT_CMD_CONNECT, &client_ver, 1) < 0) {
 		close(fd);
-		return -1;
+		return printer_status_error;
 	}
 
 	/* Wait for authorization (0x02) */
 	unsigned char handshake_resp[64];
-	int r_len = niimbot_read_packet(p->fd, 0x02, handshake_resp, sizeof(handshake_resp), 2);
+	int r_len = niimbot_read_packet(fd, 0x02, handshake_resp, sizeof(handshake_resp), 2);
 	if (r_len <= 0) {
 		fprintf(stderr, "[Niimbot] Handshake failed (No response from printer).\n");
 		close(fd);
-		return -1;
+		return printer_status_error;
 	}
 
-	p->fd = fd;
+	niimbot_ctx.fd = fd;
 	niimbot_ctx.tx_seq = 0;
 	p->private = &niimbot_ctx;
 
 	printf("[Niimbot] Handshake successful. Device authorized.\n");
-	p->opened = true;
-	return 0;
+	return printer_status_ok;
 }
 
-static void niimbot_close(fichero_t *p)
+static int niimbot_close(printer_t *p)
 {
-	if (p->opened) {
-		close(p->fd);
-		p->opened = false;
+	struct niimbot_ctx *ctx = (struct niimbot_ctx *)p->private;
+
+	if (ctx->fd < 0) {
+		return printer_status_error;
 	}
+
+	close(ctx->fd);
+	ctx->fd = -1;
+
+	p->private = NULL;
+	close(ctx->fd);
+
+	return printer_status_ok;
 }
 
-static int niimbot_status(fichero_t *p, int *p_status)
+static int niimbot_status(printer_t *p, int *p_status)
 {
+	struct niimbot_ctx *ctx = (struct niimbot_ctx *)p->private;
 	uint8_t cmd_status_data = 0x01;
 	unsigned char resp_data[32];
 	int status = 0;
 
 	printf("[Status] Requesting Niimbot printer state...\n");
-	if (niimbot_send_packet(p->fd, NIIMBOT_CMD_STATUS, &cmd_status_data, 1) < 0) {
-		return fichero_status_error;
+	if (niimbot_send_packet(ctx->fd, NIIMBOT_CMD_STATUS, &cmd_status_data, 1) < 0) {
+		return printer_status_error;
 	}
 
-	int len = niimbot_read_packet(p->fd, 0x41, resp_data, sizeof(resp_data), 2);
+	int len = niimbot_read_packet(ctx->fd, 0x41, resp_data, sizeof(resp_data), 2);
 	if (len <= 0) {
 		fprintf(stderr, "[Error] No status response from Niimbot (Timeout).\n");
-		return fichero_status_timeout;
+		return printer_status_timeout;
 	}
 
 	uint8_t status_byte = resp_data[0];
@@ -235,29 +241,29 @@ static int niimbot_status(fichero_t *p, int *p_status)
 	if (status_byte == 0x00) {
 		printf("[Status] Niimbot printer ready.\n");
 		if (p_status)
-			*p_status = fichero_status_ok;
-		return fichero_status_ok;
+			*p_status = printer_status_ok;
+		return printer_status_ok;
 	}
 
 	if (status_byte & 0x01) {
 		printf("[Status] Niimbot is currently busy...\n");
-		status |= fichero_flag_busy;
+		status |= printer_flag_busy;
 	}
 	if (status_byte & 0x02) {
 		fprintf(stderr, "[Error] Niimbot cover is open!\n");
-		status |= fichero_flag_open_cover;
+		status |= printer_flag_open_cover;
 	}
 	if (status_byte & 0x04) {
 		fprintf(stderr, "[Error] Out of paper!\n");
-		status |= fichero_flag_no_paper;
+		status |= printer_flag_no_paper;
 	}
 	if (status_byte & 0x08) {
 		fprintf(stderr, "[Error] Low battery!\n");
-		status |= fichero_flag_battery_low;
+		status |= printer_flag_battery_low;
 	}
 	if (status_byte & 0x10 || status_byte & 0x40) {
 		fprintf(stderr, "[Error] Niimbot head overheated!\n");
-		status |= fichero_flag_head_overheat;
+		status |= printer_flag_head_overheat;
 	}
 
 	if (p_status != NULL) {
@@ -267,8 +273,11 @@ static int niimbot_status(fichero_t *p, int *p_status)
 	return status;
 }
 
-static int niimbot_setup_density(fichero_t *p, int density)
+static int niimbot_setup_density(printer_t *p, int density)
 {
+	struct niimbot_ctx *ctx = (struct niimbot_ctx *)p->private;
+
+	/* Map: 1 (low), 2 (medium), 3 (high) */
 	uint8_t d_val = 2;
 	if (density == 0)
 		d_val = 1;
@@ -276,15 +285,17 @@ static int niimbot_setup_density(fichero_t *p, int density)
 		d_val = 3;
 
 	printf("[Config] Setting Niimbot density to %d...\n", d_val);
-	if (niimbot_send_packet(p->fd, NIIMBOT_CMD_DENSITY, &d_val, 1) < 0) {
-		return fichero_status_error;
+	if (niimbot_send_packet(ctx->fd, NIIMBOT_CMD_DENSITY, &d_val, 1) < 0) {
+		return printer_status_error;
 	}
 
-	return fichero_status_ok;
+	return printer_status_ok;
 }
 
-static int niimbot_setup_paper(fichero_t *p, int paper_type)
+static int niimbot_setup_paper(printer_t *p, int paper_type)
 {
+	struct niimbot_ctx *ctx = (struct niimbot_ctx *)p->private;
+
 	/* Map: 1 = Gap/Label, 2 = Black Mark, 3 = Continuous */
 	uint8_t p_val = 1;
 	if (paper_type == 1)
@@ -293,30 +304,41 @@ static int niimbot_setup_paper(fichero_t *p, int paper_type)
 		p_val = 3;
 
 	printf("[Config] Setting Niimbot paper type to %d...\n", p_val);
-	if (niimbot_send_packet(p->fd, NIIMBOT_CMD_PAPER, &p_val, 1) < 0) {
-		return fichero_status_error;
+	if (niimbot_send_packet(ctx->fd, NIIMBOT_CMD_PAPER, &p_val, 1) < 0) {
+		return printer_status_error;
 	}
 
-	return fichero_status_ok;
+	return printer_status_ok;
 }
 
-static int niimbot_wakeup(fichero_t *p)
+static int niimbot_set_property(printer_t *p, int key, int value)
+{
+	switch (key) {
+		case printer_prop_density: return niimbot_setup_density(p, value);
+		case printer_prop_paper: return niimbot_setup_paper(p, value);
+		default: break;
+	}
+
+	return printer_status_error;
+}
+
+static int niimbot_wakeup(printer_t *p)
 {
 	struct niimbot_ctx *ctx = (struct niimbot_ctx *)p->private;
 
 	uint8_t start_data[] = { 0x00, 0x01 };
 
 	printf("[Print] Sending Print-Start initialization to Niimbot...\n");
-	if (niimbot_send_packet(p->fd, NIIMBOT_CMD_START, start_data, sizeof(start_data)) < 0) {
-		return fichero_status_error;
+	if (niimbot_send_packet(ctx->fd, NIIMBOT_CMD_START, start_data, sizeof(start_data)) < 0) {
+		return printer_status_error;
 	}
 
 	ctx->tx_seq = 0;
 
-	return fichero_status_ok;
+	return printer_status_ok;
 }
 
-static int niimbot_image(fichero_t *p, const unsigned char *bitmap_data, int height_pels)
+static int niimbot_send_image(printer_t *p, const unsigned char *bitmap_data, int height_pels)
 {
 	struct niimbot_ctx *ctx = (struct niimbot_ctx *)p->private;
 
@@ -326,7 +348,7 @@ static int niimbot_image(fichero_t *p, const unsigned char *bitmap_data, int hei
 
 	printf("[Data] Strumieniowanie bitmapy do Niimbota (Wysokość: %d rzędów)...\n", height_pels);
 
-	/* (CMD 0x85) [nr_linii_H] [nr_linii_L] [powtórzenia=1] [12 bytes of data] -> 15 bytes total */
+	/* (CMD 0x85) [line_no_H] [line_no_L] [repeats=1] [12 bytes of data] -> 15 bytes total */
 	unsigned char line_pkt[15];
 
 	for (int y = 0; y < height_pels; y++) {
@@ -338,51 +360,54 @@ static int niimbot_image(fichero_t *p, const unsigned char *bitmap_data, int hei
 
 		memcpy(&line_pkt[3], &bitmap_data[y * FICHERO_WIDTH_BYTES], FICHERO_WIDTH_BYTES);
 
-		if (niimbot_send_packet(p->fd, NIIMBOT_CMD_BITMAP, line_pkt, sizeof(line_pkt)) < 0) {
-			return fichero_status_error;
+		if (niimbot_send_packet(ctx->fd, NIIMBOT_CMD_BITMAP, line_pkt, sizeof(line_pkt)) < 0) {
+			return printer_status_error;
 		}
 
 		ctx->tx_seq++;
 	}
 
-	return fichero_status_ok;
+	return printer_status_ok;
 }
 
-static int niimbot_formfeed(fichero_t *p)
+static int niimbot_formfeed(printer_t *p)
 {
+	struct niimbot_ctx *ctx = (struct niimbot_ctx *)p->private;
+
 	uint8_t end_val = 0x01;
 	printf("[Print] Sending End-Of-Print / Formfeed command to Niimbot...\n");
-	if (niimbot_send_packet(p->fd, NIIMBOT_CMD_END, &end_val, 1) < 0) {
-		return fichero_status_error;
+	if (niimbot_send_packet(ctx->fd, NIIMBOT_CMD_END, &end_val, 1) < 0) {
+		return printer_status_error;
 	}
-	return fichero_status_ok;
+	return printer_status_ok;
 }
 
-static int niimbot_stop_wait(fichero_t *p)
+static int niimbot_stop_wait(printer_t *p)
 {
+	struct niimbot_ctx *ctx = (struct niimbot_ctx *)p->private;
+
 	printf("[Print] Waiting for Niimbot to finish mechanical movement...\n");
 
 	unsigned char final_data[16];
-	int final_len = niimbot_read_packet(p->fd, 0x16, final_data, sizeof(final_data), 15);
+	int final_len = niimbot_read_packet(ctx->fd, 0x16, final_data, sizeof(final_data), 15);
 
 	if (final_len >= 0) {
 		printf("[Success] Niimbot finished physical label printing successfully.\n");
-		return fichero_status_ok;
+		return printer_status_ok;
 	}
 	else {
 		fprintf(stderr, "[Error] Timeout or packet error waiting for Niimbot completion.\n");
-		return fichero_status_timeout;
+		return printer_status_timeout;
 	}
 }
 
-printer_ops_t printer_ops_niimbot = {
+struct printer_ops printer_ops_niimbot = {
 	.open = niimbot_open,
 	.close = niimbot_close,
 	.status = niimbot_status,
-	.setup_density = niimbot_setup_density,
-	.setup_paper = niimbot_setup_paper,
+	.set_property = niimbot_set_property,
 	.wakeup = niimbot_wakeup,
-	.image = niimbot_image,
+	.send_image = niimbot_send_image,
 	.formfeed = niimbot_formfeed,
 	.stop_wait = niimbot_stop_wait,
 };

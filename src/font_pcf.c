@@ -9,42 +9,6 @@
 #include <string.h>
 #include "font_pcf.h"
 
-/* Helper function decoding UTF-8 to a single Unicode codepoint */
-static int next_utf8_codepoint(const char **text)
-{
-	unsigned char c = (unsigned char)(**text);
-	if (c == '\0')
-		return 0;
-
-	(*text)++;
-
-	/* 1 byte (Standard ASCII: 0xxxxxxx) */
-	if (c < 0x80) {
-		return c;
-	}
-	/* 2 bytes (Diacritical characters: 110xxxxx 10xxxxxx) */
-	else if ((c & 0xE0) == 0xC0) {
-		unsigned char next = (unsigned char)(**text);
-		if ((next & 0xC0) == 0x80) {
-			(*text)++;
-			return ((c & 0x1F) << 6) | (next & 0x3F);
-		}
-	}
-	/* 3 bytes (1110xxxx 10xxxxxx 10xxxxxx) */
-	else if ((c & 0xF0) == 0xE0) {
-		unsigned char next1 = (unsigned char)(**text);
-		if ((next1 & 0xC0) == 0x80) {
-			(*text)++;
-			unsigned char next2 = (unsigned char)(**text);
-			if ((next2 & 0xC0) == 0x80) {
-				(*text)++;
-				return ((c & 0x0F) << 12) | ((next1 & 0x3F) << 6) | (next2 & 0x3F);
-			}
-		}
-	}
-	return '?';
-}
-
 #define PCF_MAGIC_LE 0x70636601
 #define PCF_MAGIC_BE 0x01666370
 
@@ -107,6 +71,42 @@ static inline uint8_t reverse_bits(uint8_t b)
 	b = (b & 0xCC) >> 2 | (b & 0x33) << 2;
 	b = (b & 0xAA) >> 1 | (b & 0x55) << 1;
 	return b;
+}
+
+/* Helper function decoding UTF-8 to a single Unicode codepoint */
+static int next_utf8_codepoint(const char **text)
+{
+	unsigned char c = (unsigned char)(**text);
+	if (c == '\0')
+		return 0;
+
+	(*text)++;
+
+	/* 1 byte (Standard ASCII: 0xxxxxxx) */
+	if (c < 0x80) {
+		return c;
+	}
+	/* 2 bytes (Diacritical characters: 110xxxxx 10xxxxxx) */
+	else if ((c & 0xE0) == 0xC0) {
+		unsigned char next = (unsigned char)(**text);
+		if ((next & 0xC0) == 0x80) {
+			(*text)++;
+			return ((c & 0x1F) << 6) | (next & 0x3F);
+		}
+	}
+	/* 3 bytes (1110xxxx 10xxxxxx 10xxxxxx) */
+	else if ((c & 0xF0) == 0xE0) {
+		unsigned char next1 = (unsigned char)(**text);
+		if ((next1 & 0xC0) == 0x80) {
+			(*text)++;
+			unsigned char next2 = (unsigned char)(**text);
+			if ((next2 & 0xC0) == 0x80) {
+				(*text)++;
+				return ((c & 0x0F) << 12) | ((next1 & 0x3F) << 6) | (next2 & 0x3F);
+			}
+		}
+	}
+	return '?';
 }
 
 static uint32_t find_table_in_memory(const uint8_t *buf, uint32_t type, bool file_be, uint32_t *out_format)
@@ -386,8 +386,8 @@ int render_char(gplane_t *plane, int typeface_idx, int c, int x, int y, uint8_t 
 		const uint8_t *row_bytes_start = glyph_bits + (row * bytes_per_row);
 
 		for (int col = 0; col < width; col++) {
-			int byte_idx = col / 8;
-			int bit_idx = col % 8;
+			int byte_idx = col >> 3;
+			int bit_idx = col & 7;
 
 			uint8_t current_byte = row_bytes_start[byte_idx];
 
