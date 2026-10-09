@@ -18,11 +18,17 @@
 #define _log(fmt, ...)       printf(_log_prefix fmt "\n", ##__VA_ARGS__)
 #define _log_error(fmt, ...) fprintf(stderr, _log_prefix "Error: " fmt "\n", ##__VA_ARGS__)
 
+#if defined(EWOULDBLOCK) && (EWOULDBLOCK != EAGAIN)
+#define CHECK_WOULD_BLOCK(e) ((e) == EAGAIN || (e) == EWOULDBLOCK)
+#else
+#define CHECK_WOULD_BLOCK(e) ((e) == EAGAIN)
+#endif
+
 struct fichero_ctx {
 	int fd;
+	int density_level;
+	int paper_type;
 };
-
-static struct fichero_ctx fichero_ctx = { .fd = -1 };
 
 /* Helper function: safe write to the printer handling EINTR and partial writes */
 static int fichero_send_command(int fd, const unsigned char *cmd, size_t size)
@@ -31,7 +37,7 @@ static int fichero_send_command(int fd, const unsigned char *cmd, size_t size)
 	while (written < size) {
 		ssize_t n = write(fd, cmd + written, size - written);
 		if (n < 0) {
-			if (errno == EINTR || errno == EAGAIN || errno == EWOULDBLOCK) {
+			if (errno == EINTR || CHECK_WOULD_BLOCK(errno)) {
 				continue;
 			}
 			perror("Critical error writing to RFCOMM port");
@@ -45,36 +51,54 @@ static int fichero_send_command(int fd, const unsigned char *cmd, size_t size)
 /* Helper function: read from port with timeout in seconds handling EINTR */
 static int fichero_read_response(int fd, unsigned char *buffer, size_t max_len, int timeout_sec)
 {
+	size_t total_bytes = 0;
 	fd_set set;
-	struct timeval timeout;
+	struct timeval tv;
 
-	FD_ZERO(&set);
-	FD_SET(fd, &set);
+	/* Wait for first byte with preset timeout */
+	tv.tv_sec = timeout_sec;
+	tv.tv_usec = 0;
 
-	timeout.tv_sec = timeout_sec;
-	timeout.tv_usec = 0;
+	while (total_bytes < max_len) {
+		FD_ZERO(&set);
+		FD_SET(fd, &set);
 
-	int rv = select(fd + 1, &set, NULL, NULL, &timeout);
-	if (rv == -1) {
-		if (errno == EINTR) {
-			return 0;
+		if (total_bytes > 0) {
+			/* 100ms inter-byte timeout */
+			tv.tv_sec = 0;
+			tv.tv_usec = 100 * 1000;
 		}
-		perror("Error in select() call");
-		return -1;
-	}
-	else if (rv == 0) {
-		/* Timeout - no data */
-		return 0;
+
+		int rv = select(fd + 1, &set, NULL, NULL, &tv);
+		if (rv == -1) {
+			if (errno == EINTR || CHECK_WOULD_BLOCK(errno)) {
+				continue;
+			}
+			perror("Error in select() call");
+			return -1;
+		}
+		else if (rv == 0) {
+			/* Timeout */
+			return (int)total_bytes;
+		}
+
+		ssize_t bytes_read = read(fd, buffer + total_bytes, max_len - total_bytes);
+		if (bytes_read < 0) {
+			if (errno == EINTR || CHECK_WOULD_BLOCK(errno)) {
+				continue;
+			}
+			perror("Error in read() call");
+			return -1;
+		}
+		else if (bytes_read == 0) {
+			/* Device closed connection */
+			return (int)total_bytes;
+		}
+
+		total_bytes += bytes_read;
 	}
 
-	ssize_t bytes_read = read(fd, buffer, max_len);
-	if (bytes_read < 0) {
-		if (errno == EINTR || errno == EAGAIN || errno == EWOULDBLOCK) {
-			return 0;
-		}
-		return -1;
-	}
-	return (int)bytes_read;
+	return (int)total_bytes;
 }
 
 static int fichero_open(printer_t *p, const char *port_path)
@@ -84,6 +108,14 @@ static int fichero_open(printer_t *p, const char *port_path)
 		perror("Cannot open RFCOMM port");
 		return printer_status_error;
 	}
+
+	struct fichero_ctx *ctx = calloc(1, sizeof(*ctx));
+	if (ctx == NULL) {
+		close(fd);
+		_log_error("Unable to allocate context data");
+		return printer_status_error;
+	}
+
 	_log("Connected to port %s. Initializing protocol...", port_path);
 
 	/* Configure port in raw mode */
@@ -95,8 +127,8 @@ static int fichero_open(printer_t *p, const char *port_path)
 		}
 	}
 
-	fichero_ctx.fd = fd;
-	p->private = &fichero_ctx;
+	ctx->fd = fd;
+	p->private = ctx;
 
 	return printer_status_ok;
 }
@@ -112,6 +144,7 @@ static int fichero_close(printer_t *p)
 	close(ctx->fd);
 	ctx->fd = -1;
 
+	free(ctx);
 	p->private = NULL;
 
 	return printer_status_ok;
@@ -120,6 +153,11 @@ static int fichero_close(printer_t *p)
 static int fichero_status(printer_t *p, int *p_status)
 {
 	struct fichero_ctx *ctx = (struct fichero_ctx *)p->private;
+
+	if (ctx == NULL) {
+		return printer_status_error;
+	}
+
 	unsigned char cmd_status[] = { 0x10, 0xFF, 0x40 };
 	unsigned char resp[10];
 	int status = 0;
@@ -200,23 +238,40 @@ static int fichero_send_config_cmd(int fd, const unsigned char *cmd, size_t size
 static int fichero_setup_density(printer_t *p, int density)
 {
 	struct fichero_ctx *ctx = (struct fichero_ctx *)p->private;
-	unsigned char cmd_density[] = { 0x10, 0xFF, 0x10, 0x00, 0x01 };
-	if (density == 0) {
-		cmd_density[4] = 0x00;
+
+	if (ctx == NULL) {
+		return printer_status_error;
 	}
-	else if (density == 2) {
-		cmd_density[4] = 0x02;
+
+	if (density < 0 || density > 2) {
+		return printer_status_error;
 	}
+
+	unsigned char cmd_density[] = { 0x10, 0xFF, 0x10, 0x00, 0x00 };
+
+	cmd_density[4] = density;
+	ctx->density_level = density;
+
 	return fichero_send_config_cmd(ctx->fd, cmd_density, sizeof(cmd_density), "Density setup");
 }
 
 static int fichero_setup_paper(printer_t *p, int paper_type)
 {
 	struct fichero_ctx *ctx = (struct fichero_ctx *)p->private;
-	unsigned char cmd_paper[] = { 0x10, 0xFF, 0x84, 0x00 };
-	if (paper_type >= 0 && paper_type <= 2) {
-		cmd_paper[3] = (unsigned char)paper_type;
+
+	if (ctx == NULL) {
+		return printer_status_error;
 	}
+
+	if (paper_type < 0 || paper_type > 2) {
+		return printer_status_error;
+	}
+
+	unsigned char cmd_paper[] = { 0x10, 0xFF, 0x84, 0x00 };
+
+	cmd_paper[3] = paper_type;
+	ctx->paper_type = paper_type;
+
 	return fichero_send_config_cmd(ctx->fd, cmd_paper, sizeof(cmd_paper), "Paper type setup");
 }
 
@@ -234,6 +289,11 @@ static int fichero_set_property(printer_t *p, int key, int value)
 static int fichero_wakeup(printer_t *p)
 {
 	struct fichero_ctx *ctx = (struct fichero_ctx *)p->private;
+
+	if (ctx == NULL) {
+		return printer_status_error;
+	}
+
 	unsigned char cmd_wakeup[12] = { 0 };
 	fichero_send_command(ctx->fd, cmd_wakeup, sizeof(cmd_wakeup));
 
@@ -241,12 +301,18 @@ static int fichero_wakeup(printer_t *p)
 	if (fichero_send_command(ctx->fd, cmd_enable, sizeof(cmd_enable)) < 0) {
 		return printer_status_error;
 	}
+
 	return printer_status_ok;
 }
 
 static int fichero_send_image(printer_t *p, const unsigned char *bitmap_data, int height_pels)
 {
 	struct fichero_ctx *ctx = (struct fichero_ctx *)p->private;
+
+	if (ctx == NULL) {
+		return printer_status_error;
+	}
+
 	if (height_pels <= 0) {
 		height_pels = FICHERO_DEFAULT_HEIGHT_PELS;
 	}
@@ -274,6 +340,11 @@ static int fichero_send_image(printer_t *p, const unsigned char *bitmap_data, in
 static int fichero_formfeed(printer_t *p)
 {
 	struct fichero_ctx *ctx = (struct fichero_ctx *)p->private;
+
+	if (ctx == NULL) {
+		return printer_status_error;
+	}
+
 	unsigned char cmd_feed[] = { 0x1D, 0x0C };
 	if (fichero_send_command(ctx->fd, cmd_feed, sizeof(cmd_feed)) < 0) {
 		return printer_status_error;
@@ -284,6 +355,11 @@ static int fichero_formfeed(printer_t *p)
 static int fichero_stop_wait(printer_t *p)
 {
 	struct fichero_ctx *ctx = (struct fichero_ctx *)p->private;
+
+	if (ctx == NULL) {
+		return printer_status_error;
+	}
+
 	unsigned char cmd_stop[] = { 0x10, 0xFF, 0xFE, 0x45 };
 	_log("Triggering print mechanism. Waiting for completion signal...");
 	if (fichero_send_command(ctx->fd, cmd_stop, sizeof(cmd_stop)) < 0) {
