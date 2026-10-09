@@ -9,7 +9,6 @@
 #include <sys/types.h> /* ssize_t, size_t */
 #include <sys/time.h>  /* struct timeval */
 
-/* Definicja wektora operacji wejścia/wyjścia (VTABLE) */
 struct aiyin_io_ops {
 	int (*open)(void **io_ctx, const char *port_path);
 	void (*close)(void *io_ctx);

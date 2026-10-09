@@ -12,8 +12,8 @@
 #include <sys/select.h>
 #include <termios.h>
 
-#include "printer.h"
 #include "aiyin_io.h"
+#include "../printer.h"
 
 #define _log_prefix          "aiyin: "
 #define _log(fmt, ...)       printf(_log_prefix fmt "\n", ##__VA_ARGS__)
@@ -143,6 +143,7 @@ static int aiyin_close(printer_t *p)
 
 	return printer_status_ok;
 }
+
 
 static int aiyin_status(printer_t *p, int *p_status)
 {

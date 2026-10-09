@@ -2,10 +2,8 @@ CC ?= gcc
 CFLAGS ?= -Wall -Wextra -O2
 LIBS ?=
 
-TARGET := fichero
-SRC_DIR := src
-
-SRC := main.c printer.c aiyin_io_fd.c aiyin_io_usb.c aiyin_ops.c niimbot_ops.c font_pcf.c
+PREFIX ?= /usr/local
+BINDIR ?= $(PREFIX)/bin
 
 # libusb-1.0
 ifeq ($(shell pkg-config --exists libusb-1.0 && echo yes),yes)
@@ -19,15 +17,37 @@ ifeq ($(shell pkg-config --exists libdmtx && echo yes),yes)
     LIBS += $(shell pkg-config --libs libdmtx)
 endif
 
-SRC_FILES := $(addprefix $(SRC_DIR)/, $(SRC))
-HDR_FILES := $(wildcard $(SRC_DIR)/*.h)
+TARGET = fichero
 
-.PHONY: all clean
+SRC_DIR := src
+BUILD_DIR := build
+
+SRC := main.c printer.c font_pcf.c
+SRC += aiyin/aiyin_ops.c aiyin/aiyin_io_fd.c aiyin/aiyin_io_usb.c
+SRC += niimbot/niimbot_ops.c
+
+SRC_FILES := $(addprefix $(SRC_DIR)/, $(SRC))
+OBJS := $(addprefix $(BUILD_DIR)/, $(SRC:.c=.o))
+BUILD_SUBDIRS := $(filter-out $(BUILD_DIR)/, $(sort $(dir $(OBJS))))
+
+.PHONY: all clean install uninstall
 
 all: $(TARGET)
 
-$(TARGET): $(SRC_FILES) $(HDR_FILES)
-	$(CC) $(CFLAGS) -o $@ $(SRC_FILES) $(LIBS)
+$(TARGET): $(OBJS)
+	$(CC) $(CFLAGS) -o $@ $(OBJS) $(LIBS)
+
+$(BUILD_DIR)/%.o: $(SRC_DIR)/%.c
+	@mkdir -p $(dir $@)
+	$(CC) $(CFLAGS) -c $< -o $@
+
+install: $(TARGET)
+	install -d $(DESTDIR)$(BINDIR)
+	install -m 755 $(TARGET) $(DESTDIR)$(BINDIR)/$(TARGET)
+
+uninstall:
+	rm -f $(DESTDIR)$(BINDIR)/$(TARGET)
 
 clean:
-	rm -f $(TARGET)
+	rm -f $(TARGET) $(OBJS)
+	rmdir $(BUILD_SUBDIRS) $(BUILD_DIR)

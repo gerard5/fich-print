@@ -17,7 +17,7 @@
 #include <stdint.h>
 #include <stdbool.h>
 
-#include "printer.h"
+#include "../printer.h"
 
 #define NIIMBOT_PKG_START 0x55
 #define NIIMBOT_PKG_END   0xAA
