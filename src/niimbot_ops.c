@@ -279,6 +279,7 @@ static int niimbot_wait_for_response(struct niimbot_ctx *ctx, uint8_t cmd, unsig
 	ts.tv_sec += timeout_sec;
 
 	pthread_mutex_lock(&ctx->cmd_mutex);
+
 	ctx->awaited_cmd = cmd;
 	ctx->cmd_received = false;
 
@@ -294,7 +295,9 @@ static int niimbot_wait_for_response(struct niimbot_ctx *ctx, uint8_t cmd, unsig
 	if (out_buf && copied > 0) {
 		memcpy(out_buf, ctx->cmd_resp_buf, copied);
 	}
+
 	pthread_mutex_unlock(&ctx->cmd_mutex);
+
 	return copied;
 }
 
