@@ -76,7 +76,7 @@ int printer_stop_wait(printer_t *p);
 
 int printer_print_label(printer_t *p, const printer_config_t *config, const unsigned char *bitmap_data, int height_pels);
 
-extern struct printer_ops printer_ops_fichero;
-extern struct printer_ops printer_ops_niimbot;
+extern const struct printer_ops printer_ops_fichero;
+extern const struct printer_ops printer_ops_niimbot;
 
 #endif /* FICHERO_H */

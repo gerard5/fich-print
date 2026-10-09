@@ -307,7 +307,7 @@ static int fichero_stop_wait(printer_t *p)
 	return printer_status_error;
 }
 
-struct printer_ops printer_ops_fichero = {
+const struct printer_ops printer_ops_fichero = {
 	.open = fichero_open,
 	.close = fichero_close,
 	.status = fichero_status,
