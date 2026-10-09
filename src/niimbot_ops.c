@@ -59,8 +59,6 @@ struct niimbot_ctx {
 	int cmd_resp_len;
 };
 
-static struct niimbot_ctx g_niimbot_ctx;
-
 static int niimbot_send_raw(int fd, const unsigned char *cmd, size_t size)
 {
 	size_t written = 0;
@@ -316,8 +314,6 @@ static uint32_t count_black_pixels(const unsigned char *row_data, int bytes_coun
 
 static int niimbot_open(struct printer *p, const char *port_path)
 {
-	struct niimbot_ctx *ctx = (struct niimbot_ctx *)&g_niimbot_ctx;
-
 	int fd = open(port_path, O_RDWR | O_NOCTTY);
 	if (fd < 0) {
 		_log_error("Cannot open RFCOMM port");
@@ -333,7 +329,13 @@ static int niimbot_open(struct printer *p, const char *port_path)
 		}
 	}
 
-	memset(ctx, 0, sizeof(*ctx));
+	struct niimbot_ctx *ctx = calloc(1, sizeof(*ctx));
+	if (ctx == NULL) {
+		close(fd);
+		_log_error("Unable to allocate context data");
+		return printer_status_error;
+	}
+
 	ctx->fd = fd;
 	ctx->density_level = 2; /* 1: light, 2: medium, 3: dark */
 	ctx->paper_type = printer_paper_gap;
@@ -345,9 +347,11 @@ static int niimbot_open(struct printer *p, const char *port_path)
 	p->private = ctx;
 
 	ctx->keep_running = true;
-	if (pthread_create(&g_niimbot_ctx.read_thread, NULL, niimbot_read_thread_func, p) != 0) {
+	if (pthread_create(&ctx->read_thread, NULL, niimbot_read_thread_func, p) != 0) {
 		_log_error("Cannot create background thread");
 		close(fd);
+		free(ctx);
+		p->private = NULL;
 		return printer_status_error;
 	}
 
@@ -366,7 +370,7 @@ static int niimbot_open(struct printer *p, const char *port_path)
 
 	/* Safely wait until the background thread catches the authorization response (0x02) */
 	unsigned char handshake_resp[16];
-	if (niimbot_wait_for_response(&g_niimbot_ctx, NIIMBOT_CMD_CONNECT_RESP, handshake_resp, sizeof(handshake_resp), 2) < 0) {
+	if (niimbot_wait_for_response(ctx, NIIMBOT_CMD_CONNECT_RESP, handshake_resp, sizeof(handshake_resp), 2) < 0) {
 		_log_error("Handshake failed (No response from printer).");
 		goto onError;
 	}
@@ -376,9 +380,12 @@ static int niimbot_open(struct printer *p, const char *port_path)
 	return printer_status_ok;
 
 onError:
-	g_niimbot_ctx.keep_running = false;
-	pthread_join(g_niimbot_ctx.read_thread, NULL);
+	ctx->keep_running = false;
+	pthread_join(ctx->read_thread, NULL);
+
 	close(fd);
+	free(ctx);
+	p->private = NULL;
 
 	return printer_status_error;
 }
@@ -401,6 +408,7 @@ static int niimbot_close(struct printer *p)
 	close(ctx->fd);
 	ctx->fd = -1;
 
+	free(p->private);
 	p->private = NULL;
 
 	return printer_status_ok;
