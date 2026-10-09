@@ -537,6 +537,7 @@ int main(int argc, char **argv)
 	}
 
 	printer_init(&p, &printer_ops_fichero);
+	/* WIP: printer_init(&p, &printer_ops_niimbot); */
 
 	if (printer_open(&p, port_path) < 0) {
 		goto onError;

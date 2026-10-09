@@ -20,7 +20,6 @@ typedef struct {
 int load_pcf(const char *filename, int slot);
 int free_pcf(int slot);
 
-int load_pcf(const char *filename, int slot);
 int render_char(gplane_t *plane, int typeface_idx, int c, int x, int y, uint8_t color);
 int get_pcf_char_step(int typeface_idx, int codepoint, int default_w);
 void render_text(gplane_t *plane, int typeface_idx, const char *text, int x, int y, uint8_t color);

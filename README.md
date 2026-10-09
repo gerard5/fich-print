@@ -42,4 +42,4 @@ make
 ## TODO
 * barcode support (EAN13, EAN5 and CODE128)
 * add USB support
-* add Niimbot D11, D110 support
+* add Niimbot D11, D110 support (Work in Progress)

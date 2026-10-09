@@ -1,5 +1,6 @@
 /*
- * Fichero D11s printer library implementation
+ * Fichero D11s thermal printer protocol implementation
+ * Copyright 2026, Gerard Świderski
  */
 
 #include "fichero.h"
@@ -10,6 +11,7 @@
 #include <fcntl.h>
 #include <errno.h>
 #include <sys/select.h>
+#include <termios.h>
 
 /* Helper function: safe write to the printer handling EINTR and partial writes */
 static int fichero_send_command(int fd, const unsigned char *cmd, size_t size)
@@ -77,6 +79,15 @@ static int fichero_open(fichero_t *p, const char *port_path)
 		return -1;
 	}
 	printf("Connected to port %s. Initializing protocol...\n", port_path);
+
+	/* Konfiguracja portu w tryb całkowicie surowy (RAW) */
+	struct termios t;
+	if (tcgetattr(fd, &t) == 0) {
+		cfmakeraw(&t); /* Czyści flagi echo, translacji znaków i sygnałów błędu */
+		if (tcsetattr(fd, TCSANOW, &t) < 0) {
+			perror("Warning: Cannot set termios raw mode");
+		}
+	}
 
 	p->fd = fd;
 	p->opened = true;

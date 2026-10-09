@@ -1,5 +1,5 @@
 /*
- * Fichero D11s thermal printer implementation
+ * Printer communication abstraction layer
  * Copyright 2026, Gerard Świderski
  */
 

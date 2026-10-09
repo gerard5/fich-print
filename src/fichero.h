@@ -1,5 +1,5 @@
 /*
- * Fichero D11s thermal printer implementation
+ * Printer communication abstraction layer
  * Copyright 2026, Gerard Świderski
  */
 
@@ -51,6 +51,7 @@ typedef struct fichero {
 	const printer_ops_t *ops;
 	int fd;
 	bool opened;
+	void *private;
 } fichero_t;
 
 void printer_init(fichero_t *p, const printer_ops_t *driver_ops);
@@ -65,5 +66,6 @@ int printer_formfeed(fichero_t *p);
 int printer_stop_wait(fichero_t *p);
 
 extern printer_ops_t printer_ops_fichero;
+extern printer_ops_t printer_ops_niimbot;
 
 #endif /* FICHERO_H */
