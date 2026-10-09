@@ -14,11 +14,15 @@
 
 #include "printer.h"
 
+#define _log_prefix          "fichero: "
+#define _log(fmt, ...)       printf(_log_prefix fmt "\n", ##__VA_ARGS__)
+#define _log_error(fmt, ...) fprintf(stderr, _log_prefix "Error: " fmt "\n", ##__VA_ARGS__)
+
 struct fichero_ctx {
 	int fd;
 };
 
-static struct fichero_ctx fichero_ctx = { .fd = -1 }; /* FIXME: alloc dynamicaly */
+static struct fichero_ctx fichero_ctx = { .fd = -1 };
 
 /* Helper function: safe write to the printer handling EINTR and partial writes */
 static int fichero_send_command(int fd, const unsigned char *cmd, size_t size)
@@ -59,7 +63,8 @@ static int fichero_read_response(int fd, unsigned char *buffer, size_t max_len, 
 		return -1;
 	}
 	else if (rv == 0) {
-		return 0; /* Timeout - no data */
+		/* Timeout - no data */
+		return 0;
 	}
 
 	ssize_t bytes_read = read(fd, buffer, max_len);
@@ -79,8 +84,9 @@ static int fichero_open(printer_t *p, const char *port_path)
 		perror("Cannot open RFCOMM port");
 		return printer_status_error;
 	}
-	printf("Connected to port %s. Initializing protocol...\n", port_path);
+	_log("Connected to port %s. Initializing protocol...", port_path);
 
+	/* Configure port in raw mode */
 	struct termios t;
 	if (tcgetattr(fd, &t) == 0) {
 		cfmakeraw(&t);
@@ -99,7 +105,7 @@ static int fichero_close(printer_t *p)
 {
 	struct fichero_ctx *ctx = (struct fichero_ctx *)p->private;
 
-	if (ctx->fd < 0) {
+	if (ctx == NULL || ctx->fd < 0) {
 		return printer_status_error;
 	}
 
@@ -118,14 +124,14 @@ static int fichero_status(printer_t *p, int *p_status)
 	unsigned char resp[10];
 	int status = 0;
 
-	printf("[Status] Checking printer state...\n");
+	_log("Checking printer state...");
 	if (fichero_send_command(ctx->fd, cmd_status, sizeof(cmd_status)) < 0) {
 		return printer_status_error;
 	}
 
 	int len = fichero_read_response(ctx->fd, resp, sizeof(resp), 2);
 	if (len <= 0) {
-		fprintf(stderr, "[Error] No status response from printer (Timeout).\n");
+		_log_error("No status response from printer (Timeout).");
 		return printer_status_timeout;
 	}
 
@@ -136,28 +142,28 @@ static int fichero_status(printer_t *p, int *p_status)
 	}
 
 	if (status_byte == 0x00) {
-		printf("[Status] Printer ready for operation.\n");
+		_log("Printer ready for operation.");
 		return printer_status_ok;
 	}
 
 	if (status_byte & 0x02) {
-		fprintf(stderr, "[Error] Printer cover is open!\n");
+		_log_error("Printer cover is open!");
 		status |= printer_flag_open_cover;
 	}
 	if (status_byte & 0x04) {
-		fprintf(stderr, "[Error] Out of paper!\n");
+		_log_error("Out of paper!");
 		status |= printer_flag_no_paper;
 	}
 	if (status_byte & 0x08) {
-		fprintf(stderr, "[Error] Low battery!\n");
+		_log_error("Low battery!");
 		status |= printer_flag_battery_low;
 	}
 	if (status_byte & 0x40 || status_byte & 0x10) {
-		fprintf(stderr, "[Error] Printer head overheated!\n");
+		_log_error("Printer head overheated!");
 		status |= printer_flag_head_overheat;
 	}
 	if (status_byte & 0x01) {
-		printf("[Status] Printer is currently busy...\n");
+		_log_error("Printer is currently busy...");
 		status |= printer_flag_busy;
 	}
 
@@ -179,7 +185,7 @@ static int fichero_send_config_cmd(int fd, const unsigned char *cmd, size_t size
 
 	int len = fichero_read_response(fd, resp, sizeof(resp), 2);
 	if (len <= 0) {
-		fprintf(stderr, "[Config] %s: no 'OK' response (Timeout)\n", cmd_name);
+		_log_error("%s: no 'OK' response (Timeout)", cmd_name);
 		return printer_status_timeout;
 	}
 
@@ -187,7 +193,7 @@ static int fichero_send_config_cmd(int fd, const unsigned char *cmd, size_t size
 		return printer_status_ok;
 	}
 
-	fprintf(stderr, "[Config] %s: Unexpected printer response\n", cmd_name);
+	_log_error("%s: Unexpected printer response", cmd_name);
 	return printer_status_error;
 }
 
@@ -257,7 +263,7 @@ static int fichero_send_image(printer_t *p, const unsigned char *bitmap_data, in
 	}
 
 	size_t bitmap_size = (size_t)FICHERO_WIDTH_BYTES * (size_t)height_pels;
-	printf("[Data] Sending bitmap buffer (%zu bytes, height: %d)...\n", bitmap_size, height_pels);
+	_log("Sending bitmap buffer (%zu bytes, height: %d)...", bitmap_size, height_pels);
 	if (fichero_send_command(ctx->fd, bitmap_data, bitmap_size) < 0) {
 		return printer_status_error;
 	}
@@ -279,7 +285,7 @@ static int fichero_stop_wait(printer_t *p)
 {
 	struct fichero_ctx *ctx = (struct fichero_ctx *)p->private;
 	unsigned char cmd_stop[] = { 0x10, 0xFF, 0xFE, 0x45 };
-	printf("[Print] Triggering print mechanism. Waiting for completion signal...\n");
+	_log("Triggering print mechanism. Waiting for completion signal...");
 	if (fichero_send_command(ctx->fd, cmd_stop, sizeof(cmd_stop)) < 0) {
 		return printer_status_error;
 	}
@@ -291,16 +297,16 @@ static int fichero_stop_wait(printer_t *p)
 
 	if (final_len > 0) {
 		if (final_resp[0] == 0xAA || strstr((char *)final_resp, "OK") != NULL) {
-			printf("[Success] Label printed successfully. Device released lock.\n");
+			_log("Label printed successfully. Device released lock.");
 			return printer_status_ok;
 		}
 		else {
-			printf("[Warning] Printer finished work, but returned an unknown response code.\n");
+			_log("Printer finished work, but returned an unknown response code.");
 			return printer_status_error;
 		}
 	}
 	else {
-		fprintf(stderr, "[Error] Print timeout. Printer did not confirm operation completion.\n");
+		_log_error("Print timeout. Printer did not confirm operation completion.");
 		return printer_status_timeout;
 	}
 

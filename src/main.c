@@ -514,7 +514,7 @@ int main(int argc, char **argv)
 	}
 
 	if (!printer_validate(&p)) {
-		fprintf(stderr, "No valid printel model was selected\n");
+		fprintf(stderr, "No valid printer model was selected\n");
 		return EXIT_FAILURE;
 	}
 

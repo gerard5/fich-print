@@ -155,7 +155,7 @@ int load_pcf(const char *filename, int slot)
 
 	FILE *file = fopen(filename, "rb");
 	if (file == NULL) {
-		fprintf(stderr, "Nie mozna otworzyc pliku PCF: %s\n", filename);
+		fprintf(stderr, "Cannot open PCF file: %s\n", filename);
 		return 0;
 	}
 
@@ -409,7 +409,7 @@ int render_char(gplane_t *plane, int typeface_idx, int c, int x, int y, uint8_t 
 	return 1;
 }
 
-/* renders single line text */
+/* Renders single line text */
 void render_text(gplane_t *plane, int typeface_idx, const char *text, int x, int y, uint8_t color)
 {
 	if (text == NULL || plane == NULL || typeface_idx < 0 || typeface_idx >= MAX_TYPEFACES) {
@@ -427,7 +427,7 @@ void render_text(gplane_t *plane, int typeface_idx, const char *text, int x, int
 	}
 }
 
-/* renders formatted multiline string (\f - left, \a - center \r - right, \b - toggle bold) */
+/* Renders formatted multiline string (\f - left, \a - center \r - right, \b - toggle bold) */
 void render_text_format(gplane_t *plane, int typeface_idx, const char *format_str)
 {
 	if (format_str == NULL || plane == NULL || typeface_idx < 0 || typeface_idx >= MAX_TYPEFACES) {
