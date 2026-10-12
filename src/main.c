@@ -15,6 +15,7 @@
 #include <stdbool.h>
 #include <stdlib.h>
 #include <string.h>
+#include <strings.h>
 #include <unistd.h>
 #include <getopt.h>
 
@@ -64,98 +65,81 @@ static const struct option long_options[] = {
 	{ NULL, 0, NULL, 0 }
 };
 
+enum {
+	lopt_text,
+	lopt_image_pbm,
+	lopt_testpattern,
+	lopt_barcode_datamatrix,
+	lopt_barcode_128,
+	lopt_barcode_ean13,
+	lopt_barcode_ean5,
+};
+
+#define LOPT_SET(op) \
+	do { \
+		lopt_typ = op; \
+		lopt_arg = optarg; \
+		lopt_count++; \
+	} while (0)
+
+int get_printer_model(const char *optarg)
+{
+	if (strcasecmp(optarg, "fichero") == 0 ||
+		strcasecmp(optarg, "aiyin") == 0) {
+		return 1;
+	}
+	else if (strcasecmp(optarg, "niimbot") == 0) {
+		return 2;
+	}
+
+	return atoi(optarg);
+}
+
 int main(int argc, char **argv)
 {
+	printer_t p = { 0 };
+	printer_config_t printer_cfg = { .density_level = 1, .paper_type = printer_paper_gap };
+
 	const char *port_path = "/dev/rfcomm0";
 	const char *font_path = "default.pcf";
-	const char *pbm_filename = NULL;
-	const char *text_str = NULL;
-	const char *dmtx_str = NULL;
-	const char *code128_str = NULL;
-	const char *ean13_str = NULL;
-	const char *ean5_str = NULL;
+	const char *lopt_arg = NULL;
+	int lopt_count = 0;
+	int lopt_typ = -1;
 
-	printer_config_t printer_cfg = { .density_level = 1, .paper_type = printer_paper_gap };
+	unsigned char *bitmap_data = NULL;
 	int printer_model = 0;
-	int preview = 0;
+	int height_pels = PRINTER_DEFAULT_HEIGHT_PELS;
+	bool is_preview = false;
+	int ret = EXIT_FAILURE;
+
+	int opt;
+	int option_index = 0;
 
 	if (argc < 2) {
 		print_usage(argv[0]);
 		return EXIT_SUCCESS;
 	}
 
-	int opt;
-	int option_index = 0;
-	int mutex_count = 0;
-
 	while ((opt = getopt_long(argc, argv, "d:m:i:D:p:t:f:b:c:3:5:Tsh", long_options, &option_index)) != -1) {
 		switch (opt) {
-			case 'd':
-				port_path = optarg;
-				break;
-			case 'm':
-				printer_model = atoi(optarg);
-				break;
-			case 'f':
-				font_path = optarg;
-				break;
-			case 't':
-				text_str = optarg;
-				mutex_count++;
-				break;
-			case 'b':
-				dmtx_str = optarg;
-				mutex_count++;
-				break;
-			case 'c':
-				code128_str = optarg;
-				mutex_count++;
-				break;
-			case '3':
-				ean13_str = optarg;
-				mutex_count++;
-				break;
-			case '5':
-				ean5_str = optarg;
-				mutex_count++;
-				break;
-			case 'i':
-				pbm_filename = optarg;
-				mutex_count++;
-				break;
-			case 'T':
-				mutex_count++;
-				break;
-			case 'D':
-				printer_cfg.density_level = atoi(optarg);
-				break;
-			case 'p':
-				printer_cfg.paper_type = atoi(optarg);
-				break;
-			case 's':
-				preview = 1;
-				break;
-			case 'h':
-				print_usage(argv[0]);
-				return EXIT_SUCCESS;
+			case 'd': port_path = optarg; break;
+			case 'm': printer_model = get_printer_model(optarg); break;
+			case 'f': font_path = optarg; break;
+			case 't': LOPT_SET(lopt_text); break;
+			case 'b': LOPT_SET(lopt_barcode_datamatrix); break;
+			case 'c': LOPT_SET(lopt_barcode_128); break;
+			case '3': LOPT_SET(lopt_barcode_ean13); break;
+			case '5': LOPT_SET(lopt_barcode_ean5); break;
+			case 'i': LOPT_SET(lopt_image_pbm); break;
+			case 'T': LOPT_SET(lopt_testpattern); break;
+			case 'D': printer_cfg.density_level = atoi(optarg); break;
+			case 'p': printer_cfg.paper_type = atoi(optarg); break;
+			case 's': is_preview = true; break;
+			case 'h': print_usage(argv[0]); return EXIT_SUCCESS;
 			case '?':
-			default:
-				print_usage(argv[0]);
-				return EXIT_FAILURE;
+			default: print_usage(argv[0]); return EXIT_FAILURE;
 		}
 	}
-
-	if (mutex_count != 1) {
-		fprintf(stderr, "Error: Print content options (-t, -b, -c, -3, -5, -i, -T) are mutually exclusive.\n");
-		print_usage(argv[0]);
-		return EXIT_FAILURE;
-	}
-
-	printer_t p = { 0 };
-	int ret = EXIT_FAILURE;
-
-	int height_pels = PRINTER_DEFAULT_HEIGHT_PELS;
-	unsigned char *bitmap_data = NULL;
 
 	switch (printer_model) {
 		case 1: printer_init(&p, &printer_ops_aiyin); break;
@@ -168,54 +152,46 @@ int main(int argc, char **argv)
 		return EXIT_FAILURE;
 	}
 
-	if (pbm_filename != NULL) {
-		bitmap_data = load_pbm_file(pbm_filename, &height_pels);
-		if (bitmap_data == NULL) {
-			return EXIT_FAILURE;
-		}
+	if (lopt_count != 1) {
+		fprintf(stderr, "Error: Print content options t,b,c,3,5,i,T are mutually exclusive.\n");
+		print_usage(argv[0]);
+		return EXIT_FAILURE;
 	}
-	else if (text_str != NULL) {
-		bitmap_data = build_text_bitmap(text_str, font_path, &height_pels);
-		if (bitmap_data == NULL) {
-			return EXIT_FAILURE;
-		}
+
+	switch (lopt_typ) {
+		case lopt_text:
+			bitmap_data = build_text_bitmap(lopt_arg, font_path, &height_pels);
+			break;
+		case lopt_image_pbm:
+			bitmap_data = load_pbm_file(lopt_arg, &height_pels);
+			break;
+		case lopt_testpattern:
+			bitmap_data = generate_test_pattern(height_pels);
+			break;
+		case lopt_barcode_datamatrix:
+			bitmap_data = build_datamatrix_bitmap(lopt_arg, &height_pels);
+			break;
+		case lopt_barcode_128:
+			bitmap_data = build_code128_bitmap(lopt_arg, font_path, &height_pels);
+			break;
+		case lopt_barcode_ean13:
+			bitmap_data = build_ean13_bitmap(lopt_arg, font_path, &height_pels);
+			break;
+		case lopt_barcode_ean5:
+			bitmap_data = build_ean5_bitmap(lopt_arg, font_path, &height_pels);
+			break;
+		default:
+			break;
 	}
-	else if (dmtx_str != NULL) {
-		bitmap_data = build_datamatrix_bitmap(dmtx_str, &height_pels);
-		if (bitmap_data == NULL) {
-			return EXIT_FAILURE;
-		}
-	}
-	else if (code128_str != NULL) {
-		bitmap_data = build_code128_bitmap(code128_str, font_path, &height_pels);
-		if (bitmap_data == NULL) {
-			return EXIT_FAILURE;
-		}
-	}
-	else if (ean13_str != NULL) {
-		bitmap_data = build_ean13_bitmap(ean13_str, font_path, &height_pels);
-		if (bitmap_data == NULL) {
-			return EXIT_FAILURE;
-		}
-	}
-	else if (ean5_str != NULL) {
-		bitmap_data = build_ean5_bitmap(ean5_str, font_path, &height_pels);
-		if (bitmap_data == NULL) {
-			return EXIT_FAILURE;
-		}
-	}
-	else {
-		bitmap_data = generate_test_pattern(height_pels);
-		if (bitmap_data == NULL) {
-			return EXIT_FAILURE;
-		}
+
+	if (bitmap_data == NULL) {
+		fprintf(stderr, "Unable to create bitmap\n");
+		return EXIT_FAILURE;
 	}
 
 	do {
-		if (preview != 0) {
-			if (!print_preview(bitmap_data, height_pels)) {
-				break;
-			}
+		if (is_preview && !print_preview(bitmap_data, height_pels)) {
+			break;
 		}
 
 		if (printer_open(&p, port_path) != printer_status_ok) {
