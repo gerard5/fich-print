@@ -1,6 +1,6 @@
 /*
  * PCF font loader, text and bitmap processing
- * Copyright 2026, Gerard Świderski
+ * Copyright 2026 Gerard Świderski
  */
 
 #include <stdbool.h>

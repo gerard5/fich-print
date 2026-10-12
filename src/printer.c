@@ -1,6 +1,6 @@
 /*
  * Printer communication abstraction layer
- * Copyright 2026, Gerard Świderski
+ * Copyright 2026 Gerard Świderski
  */
 
 #include <stdint.h>

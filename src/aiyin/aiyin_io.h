@@ -1,6 +1,6 @@
 /*
  * fichero/aiyin IO operations API
- * Copyright 2026, Gerard Świderski
+ * Copyright 2026 Gerard Świderski
  */
 
 #ifndef AIYIN_IO_H

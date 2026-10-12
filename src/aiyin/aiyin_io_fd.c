@@ -1,6 +1,6 @@
 /*
  * fichero/aiyin file descriptor based IO operations API
- * Copyright 2026, Gerard Świderski
+ * Copyright 2026 Gerard Świderski
  */
 
 #include <stdio.h>

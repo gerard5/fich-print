@@ -1,6 +1,6 @@
 /*
  * Fichero D11s thermal printer protocol implementation
- * Copyright 2026, Gerard Świderski
+ * Copyright 2026 Gerard Świderski
  */
 
 #include <assert.h>
