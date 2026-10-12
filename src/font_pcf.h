@@ -8,6 +8,8 @@
 
 #include <stdint.h>
 
+#define FREE_PCF_ALL (-1)
+
 typedef struct {
 	uint8_t *pixels;
 	unsigned int width, height;

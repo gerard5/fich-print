@@ -34,7 +34,7 @@ static int fd_open(void **io_ctx, const char *port_path)
 	}
 
 	struct fd_io_ctx *ctx = calloc(1, sizeof(*ctx));
-	if (!ctx) {
+	if (ctx == NULL) {
 		close(fd);
 		return -1;
 	}
@@ -47,11 +47,14 @@ static int fd_open(void **io_ctx, const char *port_path)
 static void fd_close(void *io_ctx)
 {
 	struct fd_io_ctx *ctx = io_ctx;
-	if (!ctx)
+	if (ctx == NULL) {
 		return;
+	}
+
 	if (ctx->fd >= 0) {
 		close(ctx->fd);
 	}
+
 	free(ctx);
 }
 

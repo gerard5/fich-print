@@ -9,6 +9,10 @@
 #include <string.h>
 #include "font_pcf.h"
 
+#ifndef FONT_DIR
+#define FONT_DIR "/usr/local/share/fichero/fonts"
+#endif
+
 #define PCF_MAGIC_LE 0x70636601
 #define PCF_MAGIC_BE 0x01666370
 
@@ -77,8 +81,9 @@ static inline uint8_t reverse_bits(uint8_t b)
 static int next_utf8_codepoint(const char **text)
 {
 	unsigned char c = (unsigned char)(**text);
-	if (c == '\0')
+	if (c == '\0') {
 		return 0;
+	}
 
 	(*text)++;
 
@@ -130,7 +135,7 @@ static uint32_t find_table_in_memory(const uint8_t *buf, uint32_t type, bool fil
 
 int free_pcf(int slot)
 {
-	if (slot == -1) {
+	if (slot == FREE_PCF_ALL) {
 		for (int i = 0; i < MAX_TYPEFACES; i++) {
 			free(typefaces[i].raw_data);
 			typefaces[i].raw_data = NULL;
@@ -149,28 +154,38 @@ int free_pcf(int slot)
 
 int load_pcf(const char *filename, int slot)
 {
+	char font_path_buf[1024];
+
 	if (slot < 0 || slot >= MAX_TYPEFACES) {
-		return 0;
+		return -1;
 	}
 
-	FILE *file = fopen(filename, "rb");
-	if (file == NULL) {
+	FILE *f = fopen(filename, "rb");
+	if (f == NULL && strchr(filename, '/') == NULL) {
+		snprintf(font_path_buf, sizeof(font_path_buf) - 1, "%s/%s", FONT_DIR, filename);
+		f = fopen(font_path_buf, "rb");
+		if (f == NULL) {
+			fprintf(stderr, "Cannot open PCF file: %s\n", font_path_buf);
+		}
+	}
+
+	if (f == NULL) {
 		fprintf(stderr, "Cannot open PCF file: %s\n", filename);
-		return 0;
+		return -1;
 	}
 
 	/* Get file size */
-	(void)fseek(file, 0, SEEK_END);
-	size_t size = ftell(file);
-	(void)fseek(file, 0, SEEK_SET);
+	(void)fseek(f, 0, SEEK_END);
+	size_t size = ftell(f);
+	(void)fseek(f, 0, SEEK_SET);
 
 	uint8_t *buf = malloc(size);
-	if (buf == NULL || fread(buf, 1, size, file) != size) {
+	if (buf == NULL || fread(buf, 1, size, f) != size) {
 		free(buf);
-		fclose(file);
-		return 0;
+		fclose(f);
+		return -1;
 	}
-	fclose(file);
+	fclose(f);
 
 	bool file_be = false;
 	uint32_t magic = mem_read32(buf, 0);
@@ -183,7 +198,7 @@ int load_pcf(const char *filename, int slot)
 	}
 	else {
 		free(buf);
-		return 0;
+		return -1;
 	}
 
 	if (typefaces[slot].raw_data) {
@@ -279,12 +294,12 @@ int load_pcf(const char *filename, int slot)
 
 	printf("Loaded PCF into slot %d (%s, maximum font dimensions: %dx%d)\n",
 		slot, filename, tf->default_width, tf->default_height);
-	return 1;
+	return 0;
 
 bad_file:
 	free(buf);
 
-	return 0;
+	return -1;
 }
 
 int get_pcf_char_step(int typeface_idx, int codepoint, int default_w)
@@ -307,8 +322,9 @@ int get_pcf_char_step(int typeface_idx, int codepoint, int default_w)
 
 	int enc_idx = (byte1 - tf->min_byte1) * (tf->max_byte2 - tf->min_byte2 + 1) + (byte2 - tf->min_byte2);
 	uint16_t glyph_idx = mem_read16(tf->glyph_indices_start + (enc_idx * 2), tf->enc_be);
-	if (glyph_idx == 0xFFFF || glyph_idx >= tf->metrics_glyph_count)
+	if (glyph_idx == 0xFFFF || glyph_idx >= tf->metrics_glyph_count) {
 		return default_w;
+	}
 
 	if (tf->metrics_compressed) {
 		const uint8_t *m = &tf->metrics_ptr[6 + (glyph_idx * 5)];
@@ -322,23 +338,28 @@ int get_pcf_char_step(int typeface_idx, int codepoint, int default_w)
 
 int render_char(gplane_t *plane, int typeface_idx, int c, int x, int y, uint8_t color)
 {
-	if (typeface_idx < 0 || typeface_idx >= MAX_TYPEFACES)
-		return 0;
+	if (typeface_idx < 0 || typeface_idx >= MAX_TYPEFACES) {
+		return -1;
+	}
+
 	typeface_t *tf = &typefaces[typeface_idx];
-	if (!tf->raw_data)
-		return 0;
+	if (tf->raw_data == NULL) {
+		return -1;
+	}
 
 	int16_t byte2 = c & 0xFF;
 	int16_t byte1 = (c >> 8) & 0xFF;
 
 	if (byte2 < tf->min_byte2 || byte2 > tf->max_byte2 ||
-		byte1 < tf->min_byte1 || byte1 > tf->max_byte1)
-		return 0;
+		byte1 < tf->min_byte1 || byte1 > tf->max_byte1) {
+		return -1;
+	}
 
 	int enc_idx = (byte1 - tf->min_byte1) * (tf->max_byte2 - tf->min_byte2 + 1) + (byte2 - tf->min_byte2);
 	uint16_t glyph_idx = mem_read16(tf->glyph_indices_start + (enc_idx * 2), tf->enc_be);
-	if (glyph_idx == 0xFFFF || glyph_idx >= tf->metrics_glyph_count)
-		return 0;
+	if (glyph_idx == 0xFFFF || glyph_idx >= tf->metrics_glyph_count) {
+		return -1;
+	}
 
 	int width = 0, height = 0, x_offset = 0, y_offset = 0, dwidth_x = 0;
 	if (tf->metrics_compressed) {
@@ -406,7 +427,7 @@ int render_char(gplane_t *plane, int typeface_idx, int c, int x, int y, uint8_t 
 		}
 	}
 
-	return 1;
+	return 0;
 }
 
 /* Renders single line text */
@@ -469,12 +490,15 @@ void render_text_format(gplane_t *plane, int typeface_idx, const char *format_st
 		}
 		while (ptr < line_end && *ptr != '\0') {
 			if (*ptr == '\a' || *ptr == '\r' || *ptr == '\f') {
-				if (*ptr == '\a')
+				if (*ptr == '\a') {
 					current_align = 'c';
-				else if (*ptr == '\r')
+				}
+				else if (*ptr == '\r') {
 					current_align = 'r';
-				else if (*ptr == '\f')
+				}
+				else if (*ptr == '\f') {
 					current_align = 'l';
+				}
 				ptr++;
 				continue;
 			}

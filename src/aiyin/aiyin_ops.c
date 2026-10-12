@@ -3,6 +3,7 @@
  * Copyright 2026, Gerard Świderski
  */
 
+#include <assert.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -35,6 +36,9 @@ struct aiyin_ctx {
 /* Helper function: safe write to the printer handling EINTR and partial writes */
 static int aiyin_send_command(struct aiyin_ctx *ctx, const unsigned char *cmd, size_t size)
 {
+	assert(ctx->io != NULL);
+	assert(ctx->io->write != NULL);
+
 	size_t written = 0;
 	while (written < size) {
 		ssize_t n = ctx->io->write(ctx->io_ctx, cmd + written, size - written);
@@ -55,6 +59,10 @@ static int aiyin_read_response(struct aiyin_ctx *ctx, unsigned char *buffer, siz
 {
 	size_t total_bytes = 0;
 	struct timeval tv;
+
+	assert(ctx->io != NULL);
+	assert(ctx->io->read != NULL);
+	assert(ctx->io->wait_readable != NULL);
 
 	tv.tv_sec = timeout_sec;
 	tv.tv_usec = 0;

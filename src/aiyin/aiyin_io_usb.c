@@ -29,7 +29,7 @@ static int usb_open(void **io_ctx, const char *port_path)
 	}
 
 	libusb_device_handle *usb_handle = libusb_open_device_with_vid_pid(NULL, AIYIN_VID, AIYIN_PID);
-	if (!usb_handle) {
+	if (usb_handle == NULL) {
 		libusb_exit(NULL);
 		return -1;
 	}
@@ -64,8 +64,10 @@ static int usb_open(void **io_ctx, const char *port_path)
 static void usb_close(void *io_ctx)
 {
 	struct usb_io_ctx *ctx = io_ctx;
-	if (!ctx)
+	if (ctx == NULL) {
 		return;
+	}
+
 	if (ctx->usb_handle) {
 		libusb_release_interface(ctx->usb_handle, 0);
 		libusb_attach_kernel_driver(ctx->usb_handle, 0);
@@ -111,8 +113,9 @@ static int usb_wait_readable(void *io_ctx, struct timeval *tv)
 
 	if (tv) {
 		ctx->curr_timeout_ms = (tv->tv_sec * 1000) + (tv->tv_usec / 1000);
-		if (ctx->curr_timeout_ms == 0)
+		if (ctx->curr_timeout_ms == 0) {
 			ctx->curr_timeout_ms = 1;
+		}
 	}
 	else {
 		ctx->curr_timeout_ms = 0;

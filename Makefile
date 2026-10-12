@@ -10,14 +10,20 @@ LIBS ?=
 
 PREFIX ?= /usr/local
 BINDIR ?= $(PREFIX)/bin
+SHARE_INSTDIR ?= $(PREFIX)/share/fichero
 
 SRC_DIR := src
 BUILD_DIR := build
+FONT_DIR := fonts
+
+FONTS := $(wildcard $(FONT_DIR)/*.pcf)
 
 SRC_FILES := $(addprefix $(SRC_DIR)/, $(SRC))
 OBJS := $(addprefix $(BUILD_DIR)/, $(SRC:.c=.o))
 DEPS := $(OBJS:.o=.d)
 BUILD_SUBDIRS := $(filter-out $(BUILD_DIR)/, $(sort $(dir $(OBJS))))
+
+CFLAGS += -DFONT_DIR="\"$(SHARE_INSTDIR)/$(FONT_DIR)\""
 
 # libusb-1.0
 ifeq ($(shell pkg-config --exists libusb-1.0 && echo yes),yes)
@@ -62,10 +68,21 @@ install: $(TARGET)
 	$(call log,INSTALL,$(TARGET))
 	$(Q)install -d $(DESTDIR)$(BINDIR)
 	$(Q)install -m 755 $(TARGET) $(DESTDIR)$(BINDIR)/$(TARGET)
+ifneq ($(FONTS),)
+	$(Q)install -d $(DESTDIR)$(SHARE_INSTDIR)/$(FONT_DIR)
+	$(Q)install -m 644 $(FONTS) $(DESTDIR)$(SHARE_INSTDIR)/$(FONT_DIR)/
+	$(Q)ln -sf fichero.pcf $(DESTDIR)$(SHARE_INSTDIR)/$(FONT_DIR)/default.pcf
+endif
 
 uninstall:
 	$(call log,REMOVE,$(TARGET))
 	$(Q)rm -f $(DESTDIR)$(BINDIR)/$(TARGET)
+ifneq ($(FONTS),)
+	$(Q)rm -f $(addprefix $(DESTDIR)$(SHARE_INSTDIR)/$(FONT_DIR)/,$(notdir $(FONTS)))
+	$(Q)rm -f $(DESTDIR)$(SHARE_INSTDIR)/$(FONT_DIR)/default.pcf
+	$(Q)rmdir $(DESTDIR)$(SHARE_INSTDIR)/$(FONT_DIR) 2>/dev/null || true
+	$(Q)rmdir $(DESTDIR)$(SHARE_INSTDIR) 2>/dev/null || true
+endif
 
 clean:
 	$(call log,CLEAN,objects)

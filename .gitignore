@@ -1,4 +1,5 @@
 # build artifacts
+build/
 *.o
 *.d
 

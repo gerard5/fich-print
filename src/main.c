@@ -212,7 +212,7 @@ static unsigned char *generate_test_pattern(int height_pels)
 /* Build bitmap from text using PCF font */
 static unsigned char *build_text_bitmap(const char *text_str, const char *font_path, int *out_height_pels)
 {
-	if (!load_pcf(font_path, 0)) {
+	if (load_pcf(font_path, 0) < 0) {
 		fprintf(stderr, "Unable to load font \"%s\"\n", font_path);
 		return NULL;
 	}
@@ -220,7 +220,7 @@ static unsigned char *build_text_bitmap(const char *text_str, const char *font_p
 	static gplane_t label_plane;
 	uint8_t *label_buf = malloc(LABEL_WIDTH * LABEL_HEIGHT * sizeof(uint8_t));
 	if (label_buf == NULL) {
-		free_pcf(-1);
+		free_pcf(FREE_PCF_ALL);
 		perror("Failed to allocate bitmap memory for label");
 		return NULL;
 	}
@@ -238,7 +238,7 @@ static unsigned char *build_text_bitmap(const char *text_str, const char *font_p
 	if (str == NULL) {
 		perror("Failed to duplicate text string");
 		free(label_buf);
-		free_pcf(-1);
+		free_pcf(FREE_PCF_ALL);
 		return NULL;
 	}
 
@@ -246,7 +246,7 @@ static unsigned char *build_text_bitmap(const char *text_str, const char *font_p
 	render_text_format(&label_plane, 0, str);
 	free(str);
 
-	free_pcf(-1);
+	free_pcf(FREE_PCF_ALL);
 
 	int height = LABEL_WIDTH;
 	int width = LABEL_HEIGHT;
@@ -275,7 +275,7 @@ static unsigned char *build_text_bitmap(const char *text_str, const char *font_p
 	return bitmap_data;
 }
 
-/* Build DataMatrix 2D code bitmap */
+/* Builds printer bitmap containing a Data Matrix code */
 static unsigned char *build_datamatrix_bitmap(const char *text_str, int *out_height_pels)
 {
 	static gplane_t label_plane;
@@ -336,10 +336,14 @@ static unsigned char *build_datamatrix_bitmap(const char *text_str, int *out_hei
 
 	for (int y = 0; y < dm_height; y++) {
 		for (int x = 0; x < dm_width; x++) {
+			/* libdmtx stores the image from bottom to top, so we invert the Y axis
+			 * (dm_height - 1 - y) */
 			unsigned char *dm_pixel =
 				enc->image->pxl +
 				((dm_height - 1 - y) * dm_width + x) * dm_bytes_per_pixel;
 
+			/* If the pixel in libdmtx is black (value close to 0), save it
+			 * as black (0x00) in label_buf */
 			if (*dm_pixel < 128) {
 				int target_x = offset_x + x;
 				int target_y = offset_y + y;
@@ -350,6 +354,7 @@ static unsigned char *build_datamatrix_bitmap(const char *text_str, int *out_hei
 
 	dmtxEncodeDestroy(&enc);
 
+	/* 4. Convert Landscape -> Portrait with 90-degree clockwise rotation */
 	int height = LABEL_WIDTH;
 	int width = LABEL_HEIGHT;
 	*out_height_pels = LABEL_WIDTH;
@@ -400,26 +405,6 @@ static bool print_preview(const unsigned char *bitmap_data, int height_pels)
 	return (c == 'y' || c == 'Y');
 }
 
-/* Resolve default font path relative to executable location */
-static void get_default_font_path(char *buf, size_t bufsiz, const char *argv0)
-{
-	(void)argv0;
-
-	char exe_path[1024];
-	ssize_t len = readlink("/proc/self/exe", exe_path, sizeof(exe_path) - 1);
-	if (len != -1) {
-		exe_path[len] = '\0';
-		char *dir = dirname(exe_path);
-		snprintf(buf, bufsiz, "%s/fonts/default.pcf", dir);
-		if (access(buf, R_OK) == 0) {
-			return;
-		}
-	}
-
-	/* Fallback to relative path */
-	snprintf(buf, bufsiz, "fonts/default.pcf");
-}
-
 static void print_usage(const char *prog_name)
 {
 	printf("USAGE\n");
@@ -460,11 +445,11 @@ static const struct option long_options[] = {
 int main(int argc, char **argv)
 {
 	const char *port_path = "/dev/rfcomm0";
+	const char *font_path = "default.pcf";
 	const char *pbm_filename = NULL;
 	const char *text_str = NULL;
 	const char *dmtx_str = NULL;
-	char font_path_buf[1024];
-	const char *font_path = NULL;
+
 	printer_config_t printer_cfg = { .density_level = 1, .paper_type = printer_paper_gap };
 	int printer_model = 0;
 	int preview = 0;
@@ -547,11 +532,6 @@ int main(int argc, char **argv)
 	if (!printer_validate(&p)) {
 		fprintf(stderr, "No valid printer model was selected\n");
 		return EXIT_FAILURE;
-	}
-
-	if (font_path == NULL) {
-		get_default_font_path(font_path_buf, sizeof(font_path_buf), argv[0]);
-		font_path = font_path_buf;
 	}
 
 	if (pbm_filename != NULL) {
