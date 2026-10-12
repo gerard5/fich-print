@@ -515,10 +515,10 @@ void render_text_format(gplane_t *plane, int typeface_idx, const char *format_st
 			}
 			int target_x = base_x;
 			if (current_align == 'c') {
-				target_x = (plane->width - sub_width) / 2;
+				target_x = ((int)plane->width - sub_width) / 2;
 			}
 			else if (current_align == 'r') {
-				target_x = plane->width - sub_width - base_x;
+				target_x = (int)plane->width - sub_width - base_x;
 			}
 
 			int current_x = target_x;
