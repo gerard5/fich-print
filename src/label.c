@@ -953,8 +953,32 @@ unsigned char *build_code128_bitmap(const char *text_str, char mode, const char 
 	return bitmap_data;
 }
 
+bool save_bitmap_to_pbm(const char *filename, const unsigned char *bitmap_data, int width, int height)
+{
+	if (bitmap_data == NULL || filename == NULL) {
+		return false;
+	}
+
+	FILE *fp = fopen(filename, "wb");
+	if (fp == NULL) {
+		perror("Nie można otworzyć pliku do zapisu");
+		return false;
+	}
+
+	/* P4 - binary */
+	fprintf(fp, "P4\n%d %d\n", width, height);
+
+	size_t data_size = (size_t)(width / 8) * height;
+	size_t written = fwrite(bitmap_data, 1, data_size, fp);
+
+	fclose(fp);
+
+	return written == data_size;
+}
+
 bool print_preview(const unsigned char *bitmap_data, bool ruler, int height_pels)
 {
+	save_bitmap_to_pbm("/tmp/output_label.pbm", bitmap_data, 96, height_pels);
 	for (int y = 0; y < height_pels; y++) {
 		printf("|");
 		for (int x = 0; x < PRINTER_WIDTH_PELS; x++) {
