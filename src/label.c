@@ -193,48 +193,72 @@ unsigned char *generate_test_pattern(int height_pels)
 	return bitmap_data;
 }
 
-unsigned char *build_text_bitmap(const char *text_str, const char *font_path, int *out_height_pels)
+unsigned char *build_text_bitmap(const char *text_str, const char *font_path, int *target_height_pels)
 {
 	if (load_pcf(font_path, 0) < 0) {
 		fprintf(stderr, "Unable to load font \"%s\"\n", font_path);
 		return NULL;
 	}
 
-	static gplane_t label_plane;
-	uint8_t *label_buf = malloc(LABEL_WIDTH * LABEL_HEIGHT * sizeof(uint8_t));
-	if (label_buf == NULL) {
-		free_pcf(FREE_PCF_ALL);
-		perror("Failed to allocate bitmap memory for label");
-		return NULL;
-	}
-
-	label_plane.pixels = (uint8_t *)label_buf;
-	label_plane.width = LABEL_WIDTH;
-	label_plane.height = LABEL_HEIGHT;
-	label_plane.stride = LABEL_WIDTH;
-	label_plane.stride_bytes = LABEL_WIDTH * sizeof(uint8_t);
-	label_plane.size_bytes = LABEL_WIDTH * LABEL_HEIGHT * sizeof(uint8_t);
-	label_plane.size_area = LABEL_WIDTH * LABEL_HEIGHT;
-	memset(label_plane.pixels, 0xff, label_plane.size_bytes);
-
 	char *str = strdup(text_str);
 	if (str == NULL) {
-		free(label_buf);
 		free_pcf(FREE_PCF_ALL);
 		perror("Failed to duplicate text string");
 		return NULL;
 	}
-
 	unescape_string(str);
+
+	static gplane_t label_plane = { 0 };
+
+	if (*target_height_pels > 0) {
+		label_plane.width = *target_height_pels;
+	}
+	else {
+		label_plane.width = 0;
+	}
+
+	render_text_format(&label_plane, 0, str);
+
+	if (label_plane.width < 32) {
+		label_plane.width = 32;
+	}
+	label_plane.stride = label_plane.width;
+	*target_height_pels = label_plane.width;
+
+	if (label_plane.height > PRINTER_WIDTH_PELS) {
+		fprintf(stderr, "Błąd: Tekst jest za wysoki (%d px) dla głowicy 96 px!\n", label_plane.height);
+		free(str);
+		free_pcf(FREE_PCF_ALL);
+		return NULL;
+	}
+
+	label_plane.height = PRINTER_WIDTH_PELS;
+
+	label_plane.stride_bytes = label_plane.width * sizeof(uint8_t);
+	label_plane.size_bytes = label_plane.width * label_plane.height * sizeof(uint8_t);
+	label_plane.size_area = label_plane.width * label_plane.height;
+
+	uint8_t *label_buf = malloc(label_plane.size_bytes);
+	if (label_buf == NULL) {
+		free(str);
+		free_pcf(FREE_PCF_ALL);
+		perror("Failed to allocate bitmap memory for label");
+		return NULL;
+	}
+	label_plane.pixels = label_buf;
+
+	memset(label_plane.pixels, 0xff, label_plane.size_bytes);
+
 	render_text_format(&label_plane, 0, str);
 	free(str);
 	free_pcf(FREE_PCF_ALL);
 
-	int height = LABEL_WIDTH;
-	int width = LABEL_HEIGHT;
-	*out_height_pels = LABEL_WIDTH;
+	int height = label_plane.width;
+	int width = label_plane.height;
 
-	size_t bitmap_size = PRINTER_WIDTH_BYTES * height;
+	const int printer_width_bytes = 12;
+	size_t bitmap_size = printer_width_bytes * height;
+
 	unsigned char *bitmap_data = (unsigned char *)calloc(1, bitmap_size);
 	if (bitmap_data == NULL) {
 		free(label_buf);
@@ -244,9 +268,9 @@ unsigned char *build_text_bitmap(const char *text_str, const char *font_path, in
 
 	for (int y = 0; y < height; y++) {
 		for (int x = 0; x < width; x++) {
-			int pixel = label_buf[LABEL_WIDTH * (width - x - 1) + y];
+			int pixel = label_buf[label_plane.width * (width - x - 1) + y];
 			if (pixel == 0) {
-				int byte_idx = y * PRINTER_WIDTH_BYTES + (x >> 3);
+				int byte_idx = y * printer_width_bytes + (x >> 3);
 				int bit_idx = ~x & 7;
 				bitmap_data[byte_idx] |= (1 << bit_idx);
 			}

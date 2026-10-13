@@ -437,16 +437,36 @@ void render_text(gplane_t *plane, int typeface_idx, const char *text, int x, int
 		return;
 	}
 
+	int def_h = (typefaces[typeface_idx].raw_data) ? typefaces[typeface_idx].default_height : 16;
 	int def_w = (typefaces[typeface_idx].raw_data) ? typefaces[typeface_idx].default_width : 8;
-	int current_x = x;
 
-	while (*text != '\0') {
-		int codepoint = next_utf8_codepoint(&text);
-		render_char(plane, typeface_idx, codepoint, current_x, y, color);
+	bool dry_run = (plane->width == 0 || plane->height == 0);
+
+	int current_x = x;
+	const char *ptr = text;
+
+	while (*ptr != '\0') {
+		int codepoint = next_utf8_codepoint(&ptr);
+
+		if (!dry_run) {
+			render_char(plane, typeface_idx, codepoint, current_x, y, color);
+		}
+
 		int step = get_pcf_char_step(typeface_idx, codepoint, def_w);
 		current_x += (step > 0) ? step : def_w;
 	}
+
+	if (dry_run) {
+		if (plane->width == 0) {
+			plane->width = (current_x - x);
+		}
+		if (plane->height == 0) {
+			plane->height = def_h;
+		}
+		plane->stride = plane->width;
+	}
 }
+
 
 /* Renders formatted multiline string (\f - left, \a - center \r - right, \b - toggle bold) */
 void render_text_format(gplane_t *plane, int typeface_idx, const char *format_str)
@@ -456,63 +476,76 @@ void render_text_format(gplane_t *plane, int typeface_idx, const char *format_st
 	}
 
 	typeface_t *tf = &typefaces[typeface_idx];
-
 	if (tf->raw_data == NULL) {
 		return;
 	}
 
+	bool dry_run = (plane->width == 0 || plane->height == 0);
+
 	int def_h = tf->default_height;
 	int def_w = tf->default_width;
 	int base_x = 0;
-	int base_y = -7 + ((int)plane->height - 3 * def_h) / 2 + def_h;
+
+	int lines_count = 0;
+	const char *count_ptr = format_str;
+	while (*count_ptr) {
+		if (*count_ptr++ == '\n') {
+			lines_count++;
+		}
+	}
+
+	int total_text_block_height = (lines_count + 1) * def_h;
+
+	int base_y = 0;
+	if (!dry_run) {
+		base_y = ((int)plane->height - total_text_block_height) / 2;
+		base_y -= 5;
+	}
+
+
 	bool is_bold = false;
 	const char *ptr = format_str;
 	int line_idx = 0;
-	int lines = 0;
-	while (*ptr) {
-		if (*ptr++ == '\n') {
-			lines++;
-		}
-	}
-	if (lines > 3) {
-		return;
-	}
-	base_y -= (def_h * lines / 2);
-	ptr = format_str;
-	while (*ptr != '\0' && line_idx < 3) {
+	int max_estimated_width = 0;
+
+	while (*ptr != '\0') {
 		const char *line_end = ptr;
 		while (*line_end != '\n' && *line_end != '\0') {
 			line_end++;
 		}
+
 		char current_align = 'c';
 		if (*ptr != '\a' && *ptr != '\r' && *ptr != '\f' && *ptr != '\n' && *ptr != '\0') {
 			current_align = 'l';
 		}
-		while (ptr < line_end && *ptr != '\0') {
-			if (*ptr == '\a' || *ptr == '\r' || *ptr == '\f') {
-				if (*ptr == '\a') {
+
+		const char *sub_ptr = ptr;
+		int sub_width = 0;
+		while (sub_ptr < line_end && *sub_ptr != '\0') {
+			if (*sub_ptr == '\a' || *sub_ptr == '\r' || *sub_ptr == '\f') {
+				if (*sub_ptr == '\a')
 					current_align = 'c';
-				}
-				else if (*ptr == '\r') {
+				else if (*sub_ptr == '\r')
 					current_align = 'r';
-				}
-				else if (*ptr == '\f') {
+				else if (*sub_ptr == '\f')
 					current_align = 'l';
-				}
-				ptr++;
+				sub_ptr++;
 				continue;
 			}
-			const char *sub_ptr = ptr;
-			int sub_width = 0;
-			while (sub_ptr < line_end && *sub_ptr != '\0' && *sub_ptr != '\a' && *sub_ptr != '\r' && *sub_ptr != '\f') {
-				if (*sub_ptr == '\b') {
-					sub_ptr++;
-					continue;
-				}
-				int cp = next_utf8_codepoint(&sub_ptr);
-				int step = get_pcf_char_step(typeface_idx, cp, def_w);
-				sub_width += step;
+			if (*sub_ptr == '\b') {
+				sub_ptr++;
+				continue;
 			}
+			int cp = next_utf8_codepoint(&sub_ptr);
+			int step = get_pcf_char_step(typeface_idx, cp, def_w);
+			sub_width += step;
+		}
+
+		if (sub_width > max_estimated_width) {
+			max_estimated_width = sub_width;
+		}
+
+		if (!dry_run) {
 			int target_x = base_x;
 			if (current_align == 'c') {
 				target_x = ((int)plane->width - sub_width) / 2;
@@ -523,28 +556,44 @@ void render_text_format(gplane_t *plane, int typeface_idx, const char *format_st
 
 			int current_x = target_x;
 			int current_y = base_y + def_h * line_idx;
-			while (ptr < line_end && *ptr != '\0' && *ptr != '\a' && *ptr != '\r' && *ptr != '\f') {
-				if (*ptr == '\b') {
-					ptr++;
-					if (ptr >= line_end || *ptr == '\0') {
-						break;
-					}
+			const char *render_ptr = ptr;
+
+			while (render_ptr < line_end && *render_ptr != '\0') {
+				if (*render_ptr == '\a' || *render_ptr == '\r' || *render_ptr == '\f') {
+					render_ptr++;
+					continue;
+				}
+				if (*render_ptr == '\b') {
+					render_ptr++;
 					is_bold = !is_bold;
 					continue;
 				}
-				int codepoint = next_utf8_codepoint(&ptr);
+
+				int codepoint = next_utf8_codepoint(&render_ptr);
 				render_char(plane, typeface_idx, codepoint, current_x, current_y, 0);
 				if (is_bold) {
 					render_char(plane, typeface_idx, codepoint, current_x - 1, current_y, 0);
 				}
+
 				int step = get_pcf_char_step(typeface_idx, codepoint, def_w);
 				current_x += step;
 			}
 		}
 
+		ptr = line_end;
 		if (*ptr == '\n') {
 			ptr++;
 		}
 		line_idx++;
+	}
+
+	if (dry_run) {
+		if (plane->width == 0) {
+			plane->width = max_estimated_width;
+		}
+		if (plane->height == 0) {
+			plane->height = total_text_block_height;
+		}
+		plane->stride = plane->width;
 	}
 }
