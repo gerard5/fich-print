@@ -11,6 +11,7 @@
 
 #define PRINTER_WIDTH_PELS          96
 #define PRINTER_WIDTH_BYTES         12
+#define PRINTER_PELS_PER_MM         8
 #define PRINTER_DEFAULT_HEIGHT_PELS 224
 
 enum printer_status {

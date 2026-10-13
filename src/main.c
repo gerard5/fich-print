@@ -190,7 +190,7 @@ int main(int argc, char **argv)
 	}
 
 	do {
-		if (is_preview && !print_preview(bitmap_data, height_pels)) {
+		if (is_preview && !print_preview(bitmap_data, true, height_pels)) {
 			break;
 		}
 

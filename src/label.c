@@ -746,11 +746,11 @@ unsigned char *build_code128_bitmap(const char *text_str, const char *font_path,
 	return bitmap_data;
 }
 
-bool print_preview(const unsigned char *bitmap_data, int height_pels)
+bool print_preview(const unsigned char *bitmap_data, bool ruler, int height_pels)
 {
 	for (int y = 0; y < height_pels; y++) {
 		printf("|");
-		for (int x = 0; x < 96; x++) {
+		for (int x = 0; x < PRINTER_WIDTH_PELS; x++) {
 			int byte_idx = y * PRINTER_WIDTH_BYTES + (x >> 3);
 			int bit_idx = ~x & 7;
 			if (bitmap_data[byte_idx] & (1 << bit_idx)) {
@@ -760,10 +760,40 @@ bool print_preview(const unsigned char *bitmap_data, int height_pels)
 				printf(" ");
 			}
 		}
-		printf("|\n");
+
+		if (ruler) {
+			int current_mm = y / (PRINTER_PELS_PER_MM);
+			int remainder_lines = y % (PRINTER_PELS_PER_MM);
+
+			if (y % ((PRINTER_PELS_PER_MM)*10) == 0) {
+				printf(":>%d", current_mm);
+			}
+			else if (remainder_lines == 0) {
+				printf(": %d", current_mm);
+			}
+			else if (remainder_lines == ((PRINTER_PELS_PER_MM) / 2)) {
+				printf(":");
+			}
+			else {
+				printf("|");
+			}
+		}
+		else {
+			printf("|");
+		}
+
+
+		printf("\n");
 	}
+	printf("\n");
+
+	float total_mm = (float)height_pels / (float)(PRINTER_PELS_PER_MM);
+
+	printf("Label width %d pixels, %.2f mm\n", height_pels, total_mm);
 
 	printf("Proceed with printing? [y/N]: ");
+	fflush(stdout);
+
 	int c = getchar();
 	return (c == 'y' || c == 'Y');
 }
