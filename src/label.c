@@ -48,12 +48,15 @@ static void unescape_string(char *str)
 				while (count < 2 && isxdigit((unsigned char)*src)) {
 					char c = *src;
 					int digit_val = 0;
-					if (c >= '0' && c <= '9')
+					if (c >= '0' && c <= '9') {
 						digit_val = c - '0';
-					else if (c >= 'a' && c <= 'f')
+					}
+					else if (c >= 'a' && c <= 'f') {
 						digit_val = c - 'a' + 10;
-					else if (c >= 'A' && c <= 'F')
+					}
+					else if (c >= 'A' && c <= 'F') {
 						digit_val = c - 'A' + 10;
+					}
 
 					hex_val = hex_val * 16 + digit_val;
 					src++;
@@ -394,6 +397,20 @@ static const char *ean13_parities[10] = {
 	"LGGLLG", "LGGGLG", "LGLGLG", "LGLGGL", "LGGLGL"
 };
 
+/* ITF: 'N' = Narrow, 'W' = Wide (each digit considtw of 5 elements 2 wide, 3 narrow) */
+static const char *itf_digit_patterns[10] = {
+	"NNWWN", /* digit 0 */
+	"WNNNW", /* digit 1 */
+	"NWNNW", /* digit 2 */
+	"WWNNN", /* digit 3 */
+	"NNWNW", /* digit 4 */
+	"WNWNN", /* digit 5 */
+	"NWWNN", /* digit 6 */
+	"NNNWW", /* digit 7 */
+	"WNNWN", /* digit 8 */
+	"NWNWN"  /* digit 9 */
+};
+
 /* Code 128 pattern table (107 patterns, 11 bits each, plus stop 13 bits) */
 static const char *code128_patterns[107] = {
 	"11011001100", "11001101100", "11001100110", "10010011000", "10010001100",
@@ -649,6 +666,145 @@ unsigned char *build_ean5_bitmap(const char *text_str, const char *font_path, in
 		strncpy(txt, text_str, 5);
 		txt[5] = '\0';
 		render_text(&plane, 0, txt, start_x + 18, start_y + barcode_height + 4, 0);
+		free_pcf(FREE_PCF_ALL);
+	}
+
+	unsigned char *bitmap_data = finalize_label_bitmap(label_buf, out_height_pels);
+	free(label_buf);
+	return bitmap_data;
+}
+
+/* Modulo 10 checksum (optional) */
+static int calculate_itf_checksum(const char *text)
+{
+	int len = (int)strlen(text);
+	int sum = 0;
+	int weight = 3;
+
+	for (int i = len - 1; i >= 0; i--) {
+		sum += (text[i] - '0') * weight;
+		weight = (weight == 3) ? 1 : 3;
+	}
+
+	int next_ten = ((sum + 9) / 10) * 10;
+	return next_ten - sum;
+}
+
+unsigned char *build_itf_bitmap(const char *text_str, int use_checksum, const char *font_path, int *out_height_pels)
+{
+	char pattern[4096] = { 0 };
+	char full_text[256] = { 0 };
+	strncpy(full_text, text_str, sizeof(full_text) - 2);
+	full_text[sizeof(full_text) - 2] = '\0';
+
+	size_t len = strlen(full_text);
+	if (len == 0) {
+		fprintf(stderr, "Error: ITF input cannot be empty\n");
+		return NULL;
+	}
+	for (size_t i = 0; i < len; i++) {
+		if (full_text[i] < '0' || full_text[i] > '9') {
+			fprintf(stderr, "Error: ITF supports digits only\n");
+			return NULL;
+		}
+	}
+
+	if (use_checksum |= 0) {
+		int chk = calculate_itf_checksum(full_text);
+		full_text[len] = '0' + chk;
+		full_text[len + 1] = '\0';
+		len++;
+	}
+
+	if ((len % 2) != 0) {
+		memmove(full_text + 1, full_text, len + 1);
+		full_text[0] = '0';
+		len++;
+	}
+
+	uint8_t *label_buf = malloc(LABEL_WIDTH * LABEL_HEIGHT * sizeof(uint8_t));
+	if (label_buf == NULL) {
+		return NULL;
+	}
+	memset(label_buf, 0xff, LABEL_WIDTH * LABEL_HEIGHT * sizeof(uint8_t));
+
+	/* Start pattern */
+	strcat(pattern, "1010");
+
+	for (size_t i = 0; i < len; i += 2) {
+		int c1 = full_text[i] - '0';
+		int c2 = full_text[i + 1] - '0';
+
+		const char *p1 = itf_digit_patterns[c1]; /*  Lines (black) */
+		const char *p2 = itf_digit_patterns[c2]; /*  Spaces (white) */
+
+		/* Interleave one by one, each digit consists of 5 elements */
+		for (int e = 0; e < 5; e++) {
+			/* Black line (c1) */
+			if (p1[e] == 'W') {
+				strcat(pattern, "11");
+			}
+			else {
+				strcat(pattern, "1");
+			}
+
+			/* White space (c2) */
+			if (p2[e] == 'W') {
+				strcat(pattern, "00");
+			}
+			else {
+				strcat(pattern, "0");
+			}
+		}
+	}
+
+	/* Stop pattern */
+	strcat(pattern, "1101");
+
+	int total_modules = (int)strlen(pattern);
+	int module_width = (total_modules * 2 <= (LABEL_WIDTH - 16)) ? 2 : 1;
+	int barcode_width = total_modules * module_width;
+
+	if (barcode_width > LABEL_WIDTH) {
+		fprintf(stderr, "Error: ITF width (%d px) exceeds label width (%d px)\n", barcode_width, LABEL_WIDTH);
+		free(label_buf);
+		return NULL;
+	}
+
+	int barcode_height = 56;
+	int start_x = (LABEL_WIDTH - barcode_width) / 2;
+	int start_y = 1;
+
+	for (int m = 0; m < total_modules; m++) {
+		if (pattern[m] == '1') {
+			for (int w = 0; w < module_width; w++) {
+				int x = start_x + m * module_width + w;
+				for (int y = 0; y < barcode_height; y++) {
+					int py = start_y + y;
+					if (x >= 0 && x < LABEL_WIDTH && py >= 0 && py < LABEL_HEIGHT) {
+						label_buf[py * LABEL_WIDTH + x] = 0;
+					}
+				}
+			}
+		}
+	}
+
+	if (font_path && load_pcf(font_path, 0) == 0) {
+		static gplane_t plane;
+		plane.pixels = label_buf;
+		plane.width = LABEL_WIDTH;
+		plane.height = LABEL_HEIGHT;
+		plane.stride = LABEL_WIDTH;
+
+		int text_width = 0;
+		for (size_t j = 0; j < strlen(full_text); j++) {
+			text_width += get_pcf_char_step(0, (unsigned char)full_text[j], 8);
+		}
+
+		int text_x = (LABEL_WIDTH - text_width) / 2;
+		if (text_x < 2)
+			text_x = 2;
+		render_text(&plane, 0, full_text, text_x, start_y + barcode_height + 4, 0);
 		free_pcf(FREE_PCF_ALL);
 	}
 

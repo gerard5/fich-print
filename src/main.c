@@ -35,6 +35,7 @@ static void print_usage(const char *prog_name)
 	printf("  -c, --code128 <text>     Print Code 128 barcode\n");
 	printf("  -3, --ean13 <text>       Print EAN-13 barcode\n");
 	printf("  -5, --ean5 <text>        Print EAN-5 barcode\n");
+	printf("  -I, --itf <text>         Print ITF barcode\n");
 	printf("  -i, --image <file>       Print image loaded from PBM (P1) file\n");
 	printf("  -T, --testpattern        Print Test Pattern\n");
 	printf("  -D, --density <level>    Set density level 0-2 (default: 1)\n");
@@ -71,6 +72,7 @@ enum {
 	lopt_testpattern,
 	lopt_barcode_datamatrix,
 	lopt_barcode_128,
+	lopt_barcode_itf,
 	lopt_barcode_ean13,
 	lopt_barcode_ean5,
 };
@@ -120,7 +122,7 @@ int main(int argc, char **argv)
 		return EXIT_SUCCESS;
 	}
 
-	while ((opt = getopt_long(argc, argv, "d:m:i:D:p:t:f:b:c:3:5:Tsh", long_options, &option_index)) != -1) {
+	while ((opt = getopt_long(argc, argv, "d:m:i:I:D:p:t:f:b:c:3:5:Tsh", long_options, &option_index)) != -1) {
 		switch (opt) {
 			case 'd': port_path = optarg; break;
 			case 'm': printer_model = get_printer_model(optarg); break;
@@ -128,6 +130,7 @@ int main(int argc, char **argv)
 			case 't': LOPT_SET(lopt_text); break;
 			case 'b': LOPT_SET(lopt_barcode_datamatrix); break;
 			case 'c': LOPT_SET(lopt_barcode_128); break;
+			case 'I': LOPT_SET(lopt_barcode_itf); break;
 			case '3': LOPT_SET(lopt_barcode_ean13); break;
 			case '5': LOPT_SET(lopt_barcode_ean5); break;
 			case 'i': LOPT_SET(lopt_image_pbm); break;
@@ -173,6 +176,9 @@ int main(int argc, char **argv)
 			break;
 		case lopt_barcode_128:
 			bitmap_data = build_code128_bitmap(lopt_arg, 'B', font_path, &height_pels);
+			break;
+		case lopt_barcode_itf:
+			bitmap_data = build_itf_bitmap(lopt_arg, 0, font_path, &height_pels);
 			break;
 		case lopt_barcode_ean13:
 			bitmap_data = build_ean13_bitmap(lopt_arg, font_path, &height_pels);
