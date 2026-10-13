@@ -172,7 +172,7 @@ int main(int argc, char **argv)
 			bitmap_data = build_datamatrix_bitmap(lopt_arg, &height_pels);
 			break;
 		case lopt_barcode_128:
-			bitmap_data = build_code128_bitmap(lopt_arg, font_path, &height_pels);
+			bitmap_data = build_code128_bitmap(lopt_arg, 'B', font_path, &height_pels);
 			break;
 		case lopt_barcode_ean13:
 			bitmap_data = build_ean13_bitmap(lopt_arg, font_path, &height_pels);

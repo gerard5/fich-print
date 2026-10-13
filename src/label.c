@@ -657,20 +657,51 @@ unsigned char *build_ean5_bitmap(const char *text_str, const char *font_path, in
 	return bitmap_data;
 }
 
-unsigned char *build_code128_bitmap(const char *text_str, const char *font_path, int *out_height_pels)
+unsigned char *build_code128_bitmap(const char *text_str, char mode, const char *font_path, int *out_height_pels)
 {
+	char pattern[2048] = { 0 };
+
 	size_t len = strlen(text_str);
 	if (len == 0) {
 		fprintf(stderr, "Error: Code 128 input cannot be empty\n");
 		return NULL;
 	}
 
-	for (size_t i = 0; i < len; i++) {
-		unsigned char ch = (unsigned char)text_str[i];
-		if (ch < 32 || ch > 126) {
-			fprintf(stderr, "Error: Unsupported Code 128 character '%c' (ASCII %d)\n", ch, ch);
+	mode |= 0x20; /* lower case */
+
+	if (mode == 'c') {
+		if (len % 2 != 0) {
+			fprintf(stderr, "Error: Code 128C requires an even number of digits\n");
 			return NULL;
 		}
+		for (size_t i = 0; i < len; i++) {
+			if (text_str[i] < '0' || text_str[i] > '9') {
+				fprintf(stderr, "Error: Code 128C supports digits only ('%c' found)\n", text_str[i]);
+				return NULL;
+			}
+		}
+	}
+	else if (mode == 'a') {
+		for (size_t i = 0; i < len; i++) {
+			unsigned char ch = (unsigned char)text_str[i];
+			if (ch > 95) {
+				fprintf(stderr, "Error: Unsupported Code 128A character '%c'\n", ch);
+				return NULL;
+			}
+		}
+	}
+	else if (mode == 'b') {
+		for (size_t i = 0; i < len; i++) {
+			unsigned char ch = (unsigned char)text_str[i];
+			if (ch < 32 || ch > 126) {
+				fprintf(stderr, "Error: Unsupported Code 128B character '%c' (ASCII %d)\n", ch, ch);
+				return NULL;
+			}
+		}
+	}
+	else {
+		fprintf(stderr, "Error: Unsupported Code 128 mode '%c'\n", mode);
+		return NULL;
 	}
 
 	uint8_t *label_buf = malloc(LABEL_WIDTH * LABEL_HEIGHT * sizeof(uint8_t));
@@ -679,20 +710,39 @@ unsigned char *build_code128_bitmap(const char *text_str, const char *font_path,
 	}
 	memset(label_buf, 0xff, LABEL_WIDTH * LABEL_HEIGHT * sizeof(uint8_t));
 
-	/* Code 128 Code Set B: Start B index = 104 */
-	int checksum = 104;
-	char pattern[2048] = "";
-	strcat(pattern, code128_patterns[104]);
+	int start_val = (mode == 'a') ? 103 : ((mode == 'b') ? 104 : 105);
+	int checksum = start_val;
 
-	for (size_t i = 0; i < len; i++) {
-		int val = (unsigned char)text_str[i] - 32;
-		checksum += (int)(i + 1) * val;
+	strcat(pattern, code128_patterns[start_val]);
+
+	size_t i = 0;
+	int position = 1;
+
+	while (i < len) {
+		int val = 0;
+
+		if (mode == 'c') {
+			val = (text_str[i] - '0') * 10 + (text_str[i + 1] - '0');
+			i += 2;
+		}
+		else if (mode == 'a') {
+			unsigned char ch = (unsigned char)text_str[i];
+			val = (ch < 32) ? ch + 64 : ch - 32;
+			i++;
+		}
+		else {
+			val = (unsigned char)text_str[i] - 32;
+			i++;
+		}
+
+		checksum += position * val;
 		strcat(pattern, code128_patterns[val]);
+		position++;
 	}
 
 	int check_val = checksum % 103;
 	strcat(pattern, code128_patterns[check_val]);
-	strcat(pattern, code128_patterns[106]); /* Stop pattern */
+	strcat(pattern, code128_patterns[106]);
 
 	int total_modules = (int)strlen(pattern);
 	int module_width = (total_modules * 2 <= (LABEL_WIDTH - 16)) ? 2 : 1;
@@ -730,13 +780,14 @@ unsigned char *build_code128_bitmap(const char *text_str, const char *font_path,
 		plane.stride = LABEL_WIDTH;
 
 		int text_width = 0;
-		for (size_t i = 0; i < len; i++) {
-			text_width += get_pcf_char_step(0, (unsigned char)text_str[i], 8);
+		for (size_t j = 0; j < len; j++) {
+			text_width += get_pcf_char_step(0, (unsigned char)text_str[j], 8);
 		}
 
 		int text_x = (LABEL_WIDTH - text_width) / 2;
-		if (text_x < 2)
+		if (text_x < 2) {
 			text_x = 2;
+		}
 		render_text(&plane, 0, text_str, text_x, start_y + barcode_height + 4, 0);
 		free_pcf(FREE_PCF_ALL);
 	}
