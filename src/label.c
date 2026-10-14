@@ -98,6 +98,37 @@ static void unescape_string(char *str)
 	*dst = '\0';
 }
 
+static unsigned char *convert_to_monobitmap(gplane_t *plane)
+{
+	int src_height = plane->height;
+	int src_stride = plane->width;
+
+	/* dst to src is rotated 90 degrees clock-wise */
+	int dst_height = plane->width;
+	int dst_width = plane->height;
+	int dst_stride = (dst_width + 7) >> 3;
+	size_t bitmap_size = (dst_width * dst_height) >> 3;
+
+	unsigned char *src_buf = plane->pixels;
+	unsigned char *dst_buf = (unsigned char *)calloc(1, bitmap_size);
+	if (dst_buf == NULL) {
+		return NULL;
+	}
+
+	for (int y = 0; y < dst_height; y++) {
+		for (int x = 0; x < dst_width; x++) {
+			int pixel = src_buf[src_stride * ((src_height - 1) - x) + y];
+			if (pixel == 0) {
+				int byte_idx = dst_stride * y + (x >> 3);
+				int bit_idx = ~x & 7;
+				dst_buf[byte_idx] |= (1 << bit_idx);
+			}
+		}
+	}
+
+	return dst_buf;
+}
+
 static void pbm_skip_comments(FILE *f)
 {
 	int c;
@@ -136,63 +167,100 @@ unsigned char *load_pbm_file(const char *filename, int *out_height)
 		return NULL;
 	}
 
-	if (width != PRINTER_WIDTH_BYTES * 8) {
-		fprintf(stderr, "Warning: PBM width is %d pixels, printer expects exactly %d pixels\n", width, PRINTER_WIDTH_BYTES * 8);
+	if (height != PRINTER_WIDTH_PELS) {
+		fprintf(stderr, "Error: PBM height is %d pixels, printer expects exactly %d pixels\n", height, PRINTER_WIDTH_PELS);
+		fclose(f);
+		return NULL;
 	}
 
-	size_t bitmap_size = PRINTER_WIDTH_BYTES * height;
-	unsigned char *bitmap_data = (unsigned char *)calloc(1, bitmap_size);
-	if (bitmap_data == NULL) {
+	unsigned char *label_buf = (unsigned char *)calloc(1, width * height);
+	if (label_buf == NULL) {
 		perror("Failed to allocate bitmap memory for PBM");
 		fclose(f);
 		return NULL;
 	}
 
-	for (int y = 0; y < height; y++) {
-		for (int x = 0; x < width; x++) {
+	int total_pixels = width * height;
+	int pixels_read = 0;
+	int ch;
+
+	while (pixels_read < total_pixels && (ch = fgetc(f)) != EOF) {
+		if (ch == '#') {
+			ungetc(ch, f);
 			pbm_skip_comments(f);
-			int val = 0;
-			if (fscanf(f, "%d", &val) != 1) {
-				fprintf(stderr, "Unexpected end of PBM data at y=%d, x=%d\n", y, x);
-				free(bitmap_data);
-				fclose(f);
-				return NULL;
-			}
-			if (val != 0) {
-				int byte_idx = y * PRINTER_WIDTH_BYTES + (x >> 3);
-				int bit_idx = ~x & 7;
-				bitmap_data[byte_idx] |= (1 << bit_idx);
-			}
+			continue;
+		}
+
+		if (ch == ' ' || ch == '\n' || ch == '\r' || ch == '\t') {
+			continue;
+		}
+
+		if (ch == '0' || ch == '1') {
+			label_buf[pixels_read] = (ch == '1') ? 0 : 0xff;
+			pixels_read++;
+		} else {
+			fprintf(stderr, "Unexpected character '%c' in PBM data at pixel %d\n", ch, pixels_read);
+			free(label_buf);
+			fclose(f);
+			return NULL;
 		}
 	}
 
+	if (pixels_read < total_pixels) {
+		fprintf(stderr, "Unexpected end of PBM data. Read %d of %d pixels\n", pixels_read, total_pixels);
+		free(label_buf);
+		fclose(f);
+		return NULL;
+	}
+
 	fclose(f);
-	*out_height = height;
+
+	gplane_t plane;
+	plane.pixels = (uint8_t *)label_buf;
+	plane.width = width;
+	plane.height = height;
+	plane.stride = width;
+	plane.stride_bytes = width * sizeof(uint8_t);
+	plane.size_bytes = width * height * sizeof(uint8_t);
+	plane.size_area = width * height;
+
+	*out_height = width;
+	unsigned char *bitmap_data = convert_to_monobitmap(&plane);
+
+	free(label_buf);
+
 	return bitmap_data;
 }
 
 unsigned char *generate_test_pattern(int height_pels)
 {
-	size_t bitmap_size = PRINTER_WIDTH_BYTES * height_pels;
-	unsigned char *bitmap_data = (unsigned char *)calloc(1, bitmap_size);
-	if (bitmap_data == NULL) {
-		perror("Failed to allocate test pattern memory");
-		return NULL;
-	}
+	gplane_t plane = { 0 };
 
-	int width_pels = PRINTER_WIDTH_BYTES * 8;
-	for (int y = 0; y < height_pels; y++) {
-		for (int x = 0; x < width_pels; x++) {
-			bool is_border = (y == 0 || y == height_pels - 1 || x == 0 || x == width_pels - 1);
+	unsigned char *label_buf = calloc(1, LABEL_HEIGHT * height_pels);
+
+	plane.pixels = (uint8_t *)label_buf;
+	plane.width = height_pels;
+	plane.height = LABEL_HEIGHT;
+	plane.stride = height_pels;
+	plane.stride_bytes = height_pels * sizeof(uint8_t);
+	plane.size_bytes = height_pels * LABEL_HEIGHT * sizeof(uint8_t);
+	plane.size_area = height_pels * LABEL_HEIGHT;
+
+	memset(plane.pixels, 0xff, plane.size_bytes);
+
+	for (int y = 0; y < (int)plane.height; y++) {
+		for (int x = 0; x < (int)plane.width; x++) {
+			bool is_border = (y == 0 || y == ((int)plane.height - 1) || x == 0 || x == ((int)plane.width - 1));
 			bool is_grid = ((x & 3) == 0 || (y & 3) == 0);
 			if (is_border || is_grid) {
-				int byte_idx = y * PRINTER_WIDTH_BYTES + (x >> 3);
-				int bit_idx = ~x & 7;
-				bitmap_data[byte_idx] |= (1 << bit_idx);
+				label_buf[plane.stride_bytes * y + x] = 0;
 			}
 		}
 	}
 
+	unsigned char *bitmap_data = convert_to_monobitmap(&plane);
+
+	free(label_buf);
 	return bitmap_data;
 }
 
@@ -211,74 +279,53 @@ unsigned char *build_text_bitmap(const char *text_str, const char *font_path, in
 	}
 	unescape_string(str);
 
-	static gplane_t label_plane = { 0 };
+	static gplane_t plane = { 0 };
 
 	if (*target_height_pels > 0) {
-		label_plane.width = *target_height_pels;
+		plane.width = *target_height_pels;
 	}
 	else {
-		label_plane.width = 0;
+		plane.width = 0;
 	}
 
-	render_text_format(&label_plane, 0, str);
+	render_text_format(&plane, 0, str);
 
-	if (label_plane.width < 32) {
-		label_plane.width = 32;
+	if (plane.width < 32) {
+		plane.width = 32;
 	}
-	label_plane.stride = label_plane.width;
-	*target_height_pels = label_plane.width;
+	plane.stride = plane.width;
+	*target_height_pels = plane.width;
 
-	if (label_plane.height > PRINTER_WIDTH_PELS) {
-		fprintf(stderr, "Błąd: Tekst jest za wysoki (%d px) dla głowicy 96 px!\n", label_plane.height);
+	if (plane.height > PRINTER_WIDTH_PELS) {
+		fprintf(stderr, "Błąd: Tekst jest za wysoki (%d px) dla głowicy 96 px!\n", plane.height);
 		free(str);
 		free_pcf(FREE_PCF_ALL);
 		return NULL;
 	}
 
-	label_plane.height = PRINTER_WIDTH_PELS;
+	plane.height = PRINTER_WIDTH_PELS;
 
-	label_plane.stride_bytes = label_plane.width * sizeof(uint8_t);
-	label_plane.size_bytes = label_plane.width * label_plane.height * sizeof(uint8_t);
-	label_plane.size_area = label_plane.width * label_plane.height;
+	plane.stride_bytes = plane.width * sizeof(uint8_t);
+	plane.size_bytes = plane.width * plane.height * sizeof(uint8_t);
+	plane.size_area = plane.width * plane.height;
 
-	uint8_t *label_buf = malloc(label_plane.size_bytes);
+	uint8_t *label_buf = malloc(plane.size_bytes);
 	if (label_buf == NULL) {
 		free(str);
 		free_pcf(FREE_PCF_ALL);
 		perror("Failed to allocate bitmap memory for label");
 		return NULL;
 	}
-	label_plane.pixels = label_buf;
+	plane.pixels = label_buf;
 
-	memset(label_plane.pixels, 0xff, label_plane.size_bytes);
+	memset(plane.pixels, 0xff, plane.size_bytes);
 
-	render_text_format(&label_plane, 0, str);
+	render_text_format(&plane, 0, str);
 	free(str);
 	free_pcf(FREE_PCF_ALL);
 
-	int height = label_plane.width;
-	int width = label_plane.height;
-
-	const int printer_width_bytes = 12;
-	size_t bitmap_size = printer_width_bytes * height;
-
-	unsigned char *bitmap_data = (unsigned char *)calloc(1, bitmap_size);
-	if (bitmap_data == NULL) {
-		free(label_buf);
-		perror("Failed to allocate bitmap memory for printer buffer");
-		return NULL;
-	}
-
-	for (int y = 0; y < height; y++) {
-		for (int x = 0; x < width; x++) {
-			int pixel = label_buf[label_plane.width * (width - x - 1) + y];
-			if (pixel == 0) {
-				int byte_idx = y * printer_width_bytes + (x >> 3);
-				int bit_idx = ~x & 7;
-				bitmap_data[byte_idx] |= (1 << bit_idx);
-			}
-		}
-	}
+	*target_height_pels = PRINTER_DEFAULT_HEIGHT_PELS;
+	unsigned char *bitmap_data = convert_to_monobitmap(&plane);
 
 	free(label_buf);
 	return bitmap_data;
@@ -286,22 +333,22 @@ unsigned char *build_text_bitmap(const char *text_str, const char *font_path, in
 
 unsigned char *build_datamatrix_bitmap(const char *text_str, int *out_height_pels)
 {
-	static gplane_t label_plane;
+	static gplane_t plane;
 	uint8_t *label_buf = malloc(LABEL_WIDTH * LABEL_HEIGHT * sizeof(uint8_t));
 	if (label_buf == NULL) {
 		perror("Failed to allocate bitmap memory for label");
 		return NULL;
 	}
 
-	label_plane.pixels = (uint8_t *)label_buf;
-	label_plane.width = LABEL_WIDTH;
-	label_plane.height = LABEL_HEIGHT;
-	label_plane.stride = LABEL_WIDTH;
-	label_plane.stride_bytes = LABEL_WIDTH * sizeof(uint8_t);
-	label_plane.size_bytes = LABEL_WIDTH * LABEL_HEIGHT * sizeof(uint8_t);
-	label_plane.size_area = LABEL_WIDTH * LABEL_HEIGHT;
+	plane.pixels = (uint8_t *)label_buf;
+	plane.width = LABEL_WIDTH;
+	plane.height = LABEL_HEIGHT;
+	plane.stride = LABEL_WIDTH;
+	plane.stride_bytes = LABEL_WIDTH * sizeof(uint8_t);
+	plane.size_bytes = LABEL_WIDTH * LABEL_HEIGHT * sizeof(uint8_t);
+	plane.size_area = LABEL_WIDTH * LABEL_HEIGHT;
 
-	memset(label_plane.pixels, 0xff, label_plane.size_bytes);
+	memset(plane.pixels, 0xff, plane.size_bytes);
 
 	DmtxEncode *enc = dmtxEncodeCreate();
 	if (enc == NULL) {
@@ -349,28 +396,8 @@ unsigned char *build_datamatrix_bitmap(const char *text_str, int *out_height_pel
 
 	dmtxEncodeDestroy(&enc);
 
-	int height = LABEL_WIDTH;
-	int width = LABEL_HEIGHT;
-	*out_height_pels = LABEL_WIDTH;
-
-	size_t bitmap_size = PRINTER_WIDTH_BYTES * height;
-	unsigned char *bitmap_data = (unsigned char *)calloc(1, bitmap_size);
-	if (bitmap_data == NULL) {
-		free(label_buf);
-		perror("Failed to allocate bitmap memory for printer buffer");
-		return NULL;
-	}
-
-	for (int y = 0; y < height; y++) {
-		for (int x = 0; x < width; x++) {
-			int pixel = label_buf[LABEL_WIDTH * (width - x - 1) + y];
-			if (pixel == 0) {
-				int byte_idx = y * PRINTER_WIDTH_BYTES + (x >> 3);
-				int bit_idx = ~x & 7;
-				bitmap_data[byte_idx] |= (1 << bit_idx);
-			}
-		}
-	}
+	*out_height_pels = PRINTER_DEFAULT_HEIGHT_PELS;
+	unsigned char *bitmap_data = convert_to_monobitmap(&plane);
 
 	free(label_buf);
 	return bitmap_data;
@@ -436,32 +463,6 @@ static const char *code128_patterns[107] = {
 	"10111101110", "11101011110", "11110101110", "11010000100", "11010010000",
 	"11010011100", "1100011101011"
 };
-
-static unsigned char *finalize_label_bitmap(const uint8_t *label_buf, int *out_height_pels)
-{
-	int height = LABEL_WIDTH;
-	int width = LABEL_HEIGHT;
-	*out_height_pels = LABEL_WIDTH;
-
-	size_t bitmap_size = PRINTER_WIDTH_BYTES * height;
-	unsigned char *bitmap_data = (unsigned char *)calloc(1, bitmap_size);
-	if (bitmap_data == NULL) {
-		return NULL;
-	}
-
-	for (int y = 0; y < height; y++) {
-		for (int x = 0; x < width; x++) {
-			int pixel = label_buf[LABEL_WIDTH * (width - x - 1) + y];
-			if (pixel == 0) {
-				int byte_idx = y * PRINTER_WIDTH_BYTES + (x >> 3);
-				int bit_idx = ~x & 7;
-				bitmap_data[byte_idx] |= (1 << bit_idx);
-			}
-		}
-	}
-
-	return bitmap_data;
-}
 
 unsigned char *build_ean13_bitmap(const char *text_str, const char *font_path, int *out_height_pels)
 {
@@ -557,8 +558,10 @@ unsigned char *build_ean13_bitmap(const char *text_str, const char *font_path, i
 		}
 	}
 
+	static gplane_t plane;
+	unsigned char *bitmap_data = NULL;
+
 	if (font_path && load_pcf(font_path, 0) == 0) {
-		static gplane_t plane;
 		plane.pixels = label_buf;
 		plane.width = LABEL_WIDTH;
 		plane.height = LABEL_HEIGHT;
@@ -577,9 +580,11 @@ unsigned char *build_ean13_bitmap(const char *text_str, const char *font_path, i
 		render_text(&plane, 0, left_txt, start_x + 10, text_y, 0);
 		render_text(&plane, 0, right_txt, start_x + 106, text_y, 0);
 		free_pcf(FREE_PCF_ALL);
+
+		*out_height_pels = PRINTER_DEFAULT_HEIGHT_PELS;
+		bitmap_data = convert_to_monobitmap(&plane);
 	}
 
-	unsigned char *bitmap_data = finalize_label_bitmap(label_buf, out_height_pels);
 	free(label_buf);
 	return bitmap_data;
 }
@@ -655,8 +660,10 @@ unsigned char *build_ean5_bitmap(const char *text_str, const char *font_path, in
 		}
 	}
 
+	static gplane_t plane;
+	unsigned char *bitmap_data = NULL;
+
 	if (font_path && load_pcf(font_path, 0) == 0) {
-		static gplane_t plane;
 		plane.pixels = label_buf;
 		plane.width = LABEL_WIDTH;
 		plane.height = LABEL_HEIGHT;
@@ -667,9 +674,11 @@ unsigned char *build_ean5_bitmap(const char *text_str, const char *font_path, in
 		txt[5] = '\0';
 		render_text(&plane, 0, txt, start_x + 18, start_y + barcode_height + 4, 0);
 		free_pcf(FREE_PCF_ALL);
+
+		*out_height_pels = PRINTER_DEFAULT_HEIGHT_PELS;
+		bitmap_data = convert_to_monobitmap(&plane);
 	}
 
-	unsigned char *bitmap_data = finalize_label_bitmap(label_buf, out_height_pels);
 	free(label_buf);
 	return bitmap_data;
 }
@@ -789,8 +798,10 @@ unsigned char *build_itf_bitmap(const char *text_str, int use_checksum, const ch
 		}
 	}
 
+	static gplane_t plane;
+	unsigned char *bitmap_data = NULL;
+
 	if (font_path && load_pcf(font_path, 0) == 0) {
-		static gplane_t plane;
 		plane.pixels = label_buf;
 		plane.width = LABEL_WIDTH;
 		plane.height = LABEL_HEIGHT;
@@ -806,9 +817,11 @@ unsigned char *build_itf_bitmap(const char *text_str, int use_checksum, const ch
 			text_x = 2;
 		render_text(&plane, 0, full_text, text_x, start_y + barcode_height + 4, 0);
 		free_pcf(FREE_PCF_ALL);
+
+		*out_height_pels = PRINTER_DEFAULT_HEIGHT_PELS;
+		bitmap_data = convert_to_monobitmap(&plane);
 	}
 
-	unsigned char *bitmap_data = finalize_label_bitmap(label_buf, out_height_pels);
 	free(label_buf);
 	return bitmap_data;
 }
@@ -928,8 +941,10 @@ unsigned char *build_code128_bitmap(const char *text_str, char mode, const char 
 		}
 	}
 
+	static gplane_t plane;
+	unsigned char *bitmap_data = NULL;
+
 	if (font_path && load_pcf(font_path, 0) == 0) {
-		static gplane_t plane;
 		plane.pixels = label_buf;
 		plane.width = LABEL_WIDTH;
 		plane.height = LABEL_HEIGHT;
@@ -946,9 +961,11 @@ unsigned char *build_code128_bitmap(const char *text_str, char mode, const char 
 		}
 		render_text(&plane, 0, text_str, text_x, start_y + barcode_height + 4, 0);
 		free_pcf(FREE_PCF_ALL);
+
+		*out_height_pels = PRINTER_DEFAULT_HEIGHT_PELS;
+		bitmap_data = convert_to_monobitmap(&plane);
 	}
 
-	unsigned char *bitmap_data = finalize_label_bitmap(label_buf, out_height_pels);
 	free(label_buf);
 	return bitmap_data;
 }
