@@ -21,6 +21,7 @@
 
 #include "printer.h"
 #include "label.h"
+#include "barcode.h"
 
 static void print_usage(const char *prog_name)
 {
