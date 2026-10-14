@@ -1,4 +1,4 @@
-SRC := main.c printer.c label.c font_pcf.c
+SRC := main.c printer.c label.c helpers.c font_pcf.c
 SRC += aiyin/aiyin_ops.c aiyin/aiyin_io_fd.c aiyin/aiyin_io_usb.c
 SRC += niimbot/niimbot_ops.c
 
