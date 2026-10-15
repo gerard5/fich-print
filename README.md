@@ -24,11 +24,16 @@ USAGE
   fichero [options]
 
 OPTIONS
-  -d, --device <path>      RFCOMM device path /dev/rfcommX or usb
-  -m, --model <model>      Select printer model (1 - AiYin D11, 2 - Niimbot D11,D110)
+  -d, --device <path>      RFCOMM path (default: /dev/rfcomm0) or usb
+  -m, --model <model>      Select printer model (1 - Fichero/AiYin D11s, 2 - Niimbot D11,D110)
   -f, --font <path>        Path to PCF font
   -t, --text <text>        Print formated text label (\a-center \f-left \r-right \b-bold toggle \n-newline)
   -b, --datamatrix <text>  Print Data Matrix encoding text value
+  -c, --code128 <text>     Print Code 128 barcode
+  -3, --ean13 <text>       Print EAN-13 barcode
+  -8, --ean8 <text>        Print EAN-8 barcode
+  -5, --ean5 <text>        Print EAN-5 barcode
+  -I, --itf <text>         Print ITF barcode
   -i, --image <file>       Print image loaded from PBM (P1) file
   -T, --testpattern        Print Test Pattern
   -D, --density <level>    Set density level 0-2 (default: 1)
@@ -216,6 +221,3 @@ $ sudo udevadm control --reload-rules && sudo udevadm trigger
 ```
 
 This ensures you won't need to run the printer utility with `sudo`.
-
-## TODO
-* barcode support (EAN13, EAN5 and CODE128)
