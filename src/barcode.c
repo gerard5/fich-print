@@ -10,8 +10,16 @@
 #include <string.h>
 #include <ctype.h>
 
+#include "image.h"
 #include "font_pcf.h"
 #include "barcode.h"
+
+#define PIXEL_WHITE 0xff
+#define PIXEL_BLACK 0
+
+#define _log_prefix          "barcode: "
+#define _log(fmt, ...)       printf(_log_prefix fmt "\n", ##__VA_ARGS__)
+#define _log_error(fmt, ...) fprintf(stderr, _log_prefix fmt "\n", ##__VA_ARGS__)
 
 /* 1D Barcode encoding and rendering helpers */
 static const char *eans_l_codes[10] = {
@@ -82,14 +90,14 @@ int create_barcode_EAN13(struct gplane *plane, const char *text_str, const char 
 
 	size_t len = strlen(text_str);
 	if (len < 12 || len > 13) {
-		fprintf(stderr, "Error: EAN-13 requires 12 or 13 digits\n");
+		_log_error("EAN-13 requires 12 or 13 digits");
 		return -1;
 	}
 
 	char digits[14];
 	for (size_t i = 0; i < len; i++) {
 		if (!isdigit((unsigned char)text_str[i])) {
-			fprintf(stderr, "Error: EAN-13 input must be numeric digits only\n");
+			_log_error("EAN-13 input must be numeric digits only");
 			return -1;
 		}
 		digits[i] = text_str[i];
@@ -105,7 +113,7 @@ int create_barcode_EAN13(struct gplane *plane, const char *text_str, const char 
 	if (len == 13) {
 		int actual_check = digits[12] - '0';
 		if (actual_check != expected_check) {
-			fprintf(stderr, "Warning: EAN-13 checksum incorrect (%d != %d), replacing with valid checksum\n", actual_check, expected_check);
+			_log_error("Warning: EAN-13 checksum incorrect (%d != %d), replacing with valid checksum", actual_check, expected_check);
 			digits[12] = '0' + expected_check;
 		}
 		digits[13] = '\0';
@@ -115,11 +123,11 @@ int create_barcode_EAN13(struct gplane *plane, const char *text_str, const char 
 		digits[13] = '\0';
 	}
 
-	uint8_t *label_buf = malloc(width * height * sizeof(uint8_t));
-	if (label_buf == NULL) {
+	uint8_t *pixels = malloc(width * height * sizeof(uint8_t));
+	if (pixels == NULL) {
 		return -1;
 	}
-	memset(label_buf, 0xff, width * height * sizeof(uint8_t));
+	memset(pixels, PIXEL_WHITE, width * height * sizeof(uint8_t));
 
 	char pattern[128] = "";
 	int first_digit = digits[0] - '0';
@@ -165,7 +173,7 @@ int create_barcode_EAN13(struct gplane *plane, const char *text_str, const char 
 				for (int y = 0; y < bar_height; y++) {
 					int py = start_y + y;
 					if (x >= 0 && x < width && py >= 0 && py < height) {
-						label_buf[py * width + x] = 0;
+						pixels[py * width + x] = PIXEL_BLACK;
 					}
 				}
 			}
@@ -183,14 +191,11 @@ int create_barcode_EAN13(struct gplane *plane, const char *text_str, const char 
 	int text_y = start_y + data_bar_height;
 
 	if (load_pcf(font_path, 0) != 0) {
-		free(label_buf);
+		free(pixels);
 		return -1;
 	}
 
-	plane->pixels = label_buf;
-	plane->width = width;
-	plane->height = height;
-	plane->stride = width * sizeof(uint8_t);
+	(void)plane_alloc(plane, pixels, width, height);
 
 	render_text(plane, 0, first_txt, start_x - 14, text_y, 0);
 	render_text(plane, 0, left_txt, start_x + 10, text_y, 0);
@@ -207,22 +212,22 @@ int create_barcode_EAN5(struct gplane *plane, const char *text_str, const char *
 	}
 
 	if (strlen(text_str) < 5) {
-		fprintf(stderr, "Error: EAN-5 requires 5 digits\n");
+		_log_error("EAN-5 requires 5 digits");
 		return -1;
 	}
 
 	for (int i = 0; i < 5; i++) {
 		if (!isdigit((unsigned char)text_str[i])) {
-			fprintf(stderr, "Error: EAN-5 input must be numeric digits only\n");
+			_log_error("EAN-5 input must be numeric digits only");
 			return -1;
 		}
 	}
 
-	uint8_t *label_buf = malloc(width * height * sizeof(uint8_t));
-	if (label_buf == NULL) {
+	uint8_t *pixels = malloc(width * height * sizeof(uint8_t));
+	if (pixels == NULL) {
 		return -1;
 	}
-	memset(label_buf, 0xff, width * height * sizeof(uint8_t));
+	memset(pixels, PIXEL_WHITE, width * height * sizeof(uint8_t));
 
 	int d1 = text_str[0] - '0';
 	int d2 = text_str[1] - '0';
@@ -268,7 +273,7 @@ int create_barcode_EAN5(struct gplane *plane, const char *text_str, const char *
 				for (int y = 0; y < barcode_height; y++) {
 					int py = start_y + y;
 					if (x >= 0 && x < width && py >= 0 && py < height) {
-						label_buf[py * width + x] = 0;
+						pixels[py * width + x] = PIXEL_BLACK;
 					}
 				}
 			}
@@ -280,14 +285,11 @@ int create_barcode_EAN5(struct gplane *plane, const char *text_str, const char *
 	txt[5] = '\0';
 
 	if (load_pcf(font_path, 0) != 0) {
-		free(label_buf);
+		free(pixels);
 		return -1;
 	}
 
-	plane->pixels = label_buf;
-	plane->width = width;
-	plane->height = height;
-	plane->stride = width * sizeof(uint8_t);
+	(void)plane_alloc(plane, pixels, width, height);
 
 	render_text(plane, 0, txt, start_x + 18, start_y + barcode_height, 0);
 	free_pcf(FREE_PCF_ALL);
@@ -324,12 +326,12 @@ int create_barcode_ITF(struct gplane *plane, const char *text_str, bool use_chec
 
 	size_t len = strlen(full_text);
 	if (len == 0) {
-		fprintf(stderr, "Error: ITF input cannot be empty\n");
+		_log_error("ITF input cannot be empty");
 		return -1;
 	}
 	for (size_t i = 0; i < len; i++) {
 		if (full_text[i] < '0' || full_text[i] > '9') {
-			fprintf(stderr, "Error: ITF supports digits only\n");
+			_log_error("ITF supports digits only");
 			return -1;
 		}
 	}
@@ -347,11 +349,11 @@ int create_barcode_ITF(struct gplane *plane, const char *text_str, bool use_chec
 		len++;
 	}
 
-	uint8_t *label_buf = malloc(width * height * sizeof(uint8_t));
-	if (label_buf == NULL) {
+	uint8_t *pixels = malloc(width * height * sizeof(uint8_t));
+	if (pixels == NULL) {
 		return -1;
 	}
-	memset(label_buf, 0xff, width * height * sizeof(uint8_t));
+	memset(pixels, PIXEL_WHITE, width * height * sizeof(uint8_t));
 
 	/* Start pattern */
 	strcat(pattern, "1010");
@@ -391,8 +393,8 @@ int create_barcode_ITF(struct gplane *plane, const char *text_str, bool use_chec
 	int barcode_width = total_modules * module_width;
 
 	if (barcode_width > width) {
-		fprintf(stderr, "Error: ITF width (%d px) exceeds label width (%d px)\n", barcode_width, width);
-		free(label_buf);
+		_log_error("ITF width (%d px) exceeds label width (%d px)", barcode_width, width);
+		free(pixels);
 		return -1;
 	}
 
@@ -407,7 +409,7 @@ int create_barcode_ITF(struct gplane *plane, const char *text_str, bool use_chec
 				for (int y = 0; y < barcode_height; y++) {
 					int py = start_y + y;
 					if (x >= 0 && x < width && py >= 0 && py < height) {
-						label_buf[py * width + x] = 0;
+						pixels[py * width + x] = PIXEL_BLACK;
 					}
 				}
 			}
@@ -415,14 +417,11 @@ int create_barcode_ITF(struct gplane *plane, const char *text_str, bool use_chec
 	}
 
 	if (load_pcf(font_path, 0) != 0) {
-		free(label_buf);
+		free(pixels);
 		return -1;
 	}
 
-	plane->pixels = label_buf;
-	plane->width = width;
-	plane->height = height;
-	plane->stride = width * sizeof(uint8_t);
+	(void)plane_alloc(plane, pixels, width, height);
 
 	int text_width = 0;
 	for (size_t j = 0; j < strlen(full_text); j++) {
@@ -450,7 +449,7 @@ int create_barcode_CODE128(struct gplane *plane, const char *text_str, char mode
 
 	size_t len = strlen(text_str);
 	if (len == 0) {
-		fprintf(stderr, "Error: Code 128 input cannot be empty\n");
+		_log_error("Code 128 input cannot be empty");
 		return -1;
 	}
 
@@ -458,12 +457,12 @@ int create_barcode_CODE128(struct gplane *plane, const char *text_str, char mode
 
 	if (mode == 'c') {
 		if (len % 2 != 0) {
-			fprintf(stderr, "Error: Code 128C requires an even number of digits\n");
+			_log_error("Code 128C requires an even number of digits");
 			return -1;
 		}
 		for (size_t i = 0; i < len; i++) {
 			if (text_str[i] < '0' || text_str[i] > '9') {
-				fprintf(stderr, "Error: Code 128C supports digits only ('%c' found)\n", text_str[i]);
+				_log_error("Code 128C supports digits only ('%c' found)", text_str[i]);
 				return -1;
 			}
 		}
@@ -472,7 +471,7 @@ int create_barcode_CODE128(struct gplane *plane, const char *text_str, char mode
 		for (size_t i = 0; i < len; i++) {
 			unsigned char ch = (unsigned char)text_str[i];
 			if (ch > 95) {
-				fprintf(stderr, "Error: Unsupported Code 128A character '%c'\n", ch);
+				_log_error("Unsupported Code 128A character '%c'", ch);
 				return -1;
 			}
 		}
@@ -481,21 +480,21 @@ int create_barcode_CODE128(struct gplane *plane, const char *text_str, char mode
 		for (size_t i = 0; i < len; i++) {
 			unsigned char ch = (unsigned char)text_str[i];
 			if (ch < 32 || ch > 126) {
-				fprintf(stderr, "Error: Unsupported Code 128B character '%c' (ASCII %d)\n", ch, ch);
+				_log_error("Unsupported Code 128B character '%c' (ASCII %d)", ch, ch);
 				return -1;
 			}
 		}
 	}
 	else {
-		fprintf(stderr, "Error: Unsupported Code 128 mode '%c'\n", mode);
+		_log_error("Unsupported Code 128 mode '%c'", mode);
 		return -1;
 	}
 
-	uint8_t *label_buf = malloc(width * height * sizeof(uint8_t));
-	if (label_buf == NULL) {
+	uint8_t *pixels = malloc(width * height * sizeof(uint8_t));
+	if (pixels == NULL) {
 		return -1;
 	}
-	memset(label_buf, 0xff, width * height * sizeof(uint8_t));
+	memset(pixels, PIXEL_WHITE, width * height * sizeof(uint8_t));
 
 	int start_val = (mode == 'a') ? 103 : ((mode == 'b') ? 104 : 105);
 	int checksum = start_val;
@@ -536,8 +535,8 @@ int create_barcode_CODE128(struct gplane *plane, const char *text_str, char mode
 	int barcode_width = total_modules * module_width;
 
 	if (barcode_width > width) {
-		fprintf(stderr, "Error: Code 128 barcode width (%d px) exceeds label width (%d px)\n", barcode_width, width);
-		free(label_buf);
+		_log_error("Code 128 barcode width (%d px) exceeds label width (%d px)", barcode_width, width);
+		free(pixels);
 		return -1;
 	}
 
@@ -552,7 +551,7 @@ int create_barcode_CODE128(struct gplane *plane, const char *text_str, char mode
 				for (int y = 0; y < barcode_height; y++) {
 					int py = start_y + y;
 					if (x >= 0 && x < width && py >= 0 && py < height) {
-						label_buf[py * width + x] = 0;
+						pixels[py * width + x] = PIXEL_BLACK;
 					}
 				}
 			}
@@ -560,14 +559,11 @@ int create_barcode_CODE128(struct gplane *plane, const char *text_str, char mode
 	}
 
 	if (load_pcf(font_path, 0) != 0) {
-		free(label_buf);
+		free(pixels);
 		return -1;
 	}
 
-	plane->pixels = label_buf;
-	plane->width = width;
-	plane->height = height;
-	plane->stride = width * sizeof(uint8_t);
+	(void)plane_alloc(plane, pixels, width, height);
 
 	int text_width = 0;
 	for (size_t j = 0; j < len; j++) {

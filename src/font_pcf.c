@@ -7,6 +7,8 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+
+#include "image.h"
 #include "font_pcf.h"
 
 #ifndef FONT_DIR
@@ -24,7 +26,7 @@
 #define PCF_BYTE_MASK      (1 << 2)
 #define PCF_BIT_MASK       (1 << 3)
 
-#define MAX_TYPEFACES 8
+#define MAX_TYPEFACE_SLOTS 8
 
 typedef struct {
 	uint8_t *raw_data;
@@ -55,7 +57,7 @@ typedef struct {
 	int font_descent;
 } typeface_t;
 
-static typeface_t typefaces[MAX_TYPEFACES];
+static typeface_t typefaces[MAX_TYPEFACE_SLOTS];
 
 static inline uint16_t mem_read16(const uint8_t *ptr, bool be)
 {
@@ -136,14 +138,14 @@ static uint32_t find_table_in_memory(const uint8_t *buf, uint32_t type, bool fil
 int free_pcf(int slot)
 {
 	if (slot == FREE_PCF_ALL) {
-		for (int i = 0; i < MAX_TYPEFACES; i++) {
+		for (int i = 0; i < MAX_TYPEFACE_SLOTS; i++) {
 			free(typefaces[i].raw_data);
 			typefaces[i].raw_data = NULL;
 		}
 		return 0;
 	}
 	else {
-		if (slot >= 0 && slot < MAX_TYPEFACES) {
+		if (slot >= 0 && slot < MAX_TYPEFACE_SLOTS) {
 			free(typefaces[slot].raw_data);
 			typefaces[slot].raw_data = NULL;
 			return 0;
@@ -156,7 +158,7 @@ int load_pcf(const char *filename, int slot)
 {
 	char font_path_buf[1024];
 
-	if (slot < 0 || slot >= MAX_TYPEFACES) {
+	if (slot < 0 || slot >= MAX_TYPEFACE_SLOTS) {
 		return -1;
 	}
 
@@ -302,13 +304,13 @@ bad_file:
 	return -1;
 }
 
-int get_pcf_char_step(int typeface_idx, int codepoint, int default_w)
+int get_pcf_char_step(int slot, int codepoint, int default_w)
 {
-	if (typeface_idx < 0 || typeface_idx >= MAX_TYPEFACES) {
+	if (slot < 0 || slot >= MAX_TYPEFACE_SLOTS) {
 		return default_w;
 	}
 
-	typeface_t *tf = &typefaces[typeface_idx];
+	typeface_t *tf = &typefaces[slot];
 	if (tf->raw_data == NULL) {
 		return default_w;
 	}
@@ -336,13 +338,13 @@ int get_pcf_char_step(int typeface_idx, int codepoint, int default_w)
 	}
 }
 
-int render_char(gplane_t *plane, int typeface_idx, int c, int x, int y, uint8_t color)
+int render_char(struct gplane *plane, int slot, int c, int x, int y, uint8_t color)
 {
-	if (typeface_idx < 0 || typeface_idx >= MAX_TYPEFACES) {
+	if (slot < 0 || slot >= MAX_TYPEFACE_SLOTS) {
 		return -1;
 	}
 
-	typeface_t *tf = &typefaces[typeface_idx];
+	typeface_t *tf = &typefaces[slot];
 	if (tf->raw_data == NULL) {
 		return -1;
 	}
@@ -431,14 +433,14 @@ int render_char(gplane_t *plane, int typeface_idx, int c, int x, int y, uint8_t 
 }
 
 /* Renders single line text */
-void render_text(gplane_t *plane, int typeface_idx, const char *text, int x, int y, uint8_t color)
+void render_text(struct gplane *plane, int slot, const char *text, int x, int y, uint8_t color)
 {
-	if (text == NULL || plane == NULL || typeface_idx < 0 || typeface_idx >= MAX_TYPEFACES) {
+	if (text == NULL || plane == NULL || slot < 0 || slot >= MAX_TYPEFACE_SLOTS) {
 		return;
 	}
 
-	int def_h = (typefaces[typeface_idx].raw_data) ? typefaces[typeface_idx].default_height : 16;
-	int def_w = (typefaces[typeface_idx].raw_data) ? typefaces[typeface_idx].default_width : 8;
+	int def_h = (typefaces[slot].raw_data) ? typefaces[slot].default_height : 16;
+	int def_w = (typefaces[slot].raw_data) ? typefaces[slot].default_width : 8;
 
 	bool dry_run = (plane->width == 0 || plane->height == 0);
 
@@ -449,10 +451,10 @@ void render_text(gplane_t *plane, int typeface_idx, const char *text, int x, int
 		int codepoint = next_utf8_codepoint(&ptr);
 
 		if (!dry_run) {
-			render_char(plane, typeface_idx, codepoint, current_x, y, color);
+			render_char(plane, slot, codepoint, current_x, y, color);
 		}
 
-		int step = get_pcf_char_step(typeface_idx, codepoint, def_w);
+		int step = get_pcf_char_step(slot, codepoint, def_w);
 		current_x += (step > 0) ? step : def_w;
 	}
 
@@ -469,13 +471,13 @@ void render_text(gplane_t *plane, int typeface_idx, const char *text, int x, int
 
 
 /* Renders formatted multiline string (\f - left, \a - center \r - right, \b - toggle bold) */
-void render_text_format(gplane_t *plane, int typeface_idx, const char *format_str)
+void render_text_format(struct gplane *plane, int slot, const char *format_str)
 {
-	if (format_str == NULL || plane == NULL || typeface_idx < 0 || typeface_idx >= MAX_TYPEFACES) {
+	if (format_str == NULL || plane == NULL || slot < 0 || slot >= MAX_TYPEFACE_SLOTS) {
 		return;
 	}
 
-	typeface_t *tf = &typefaces[typeface_idx];
+	typeface_t *tf = &typefaces[slot];
 	if (tf->raw_data == NULL) {
 		return;
 	}
@@ -537,7 +539,7 @@ void render_text_format(gplane_t *plane, int typeface_idx, const char *format_st
 				continue;
 			}
 			int cp = next_utf8_codepoint(&sub_ptr);
-			int step = get_pcf_char_step(typeface_idx, cp, def_w);
+			int step = get_pcf_char_step(slot, cp, def_w);
 			sub_width += step;
 		}
 
@@ -570,12 +572,12 @@ void render_text_format(gplane_t *plane, int typeface_idx, const char *format_st
 				}
 
 				int codepoint = next_utf8_codepoint(&render_ptr);
-				render_char(plane, typeface_idx, codepoint, current_x, current_y, 0);
+				render_char(plane, slot, codepoint, current_x, current_y, 0);
 				if (is_bold) {
-					render_char(plane, typeface_idx, codepoint, current_x - 1, current_y, 0);
+					render_char(plane, slot, codepoint, current_x - 1, current_y, 0);
 				}
 
-				int step = get_pcf_char_step(typeface_idx, codepoint, def_w);
+				int step = get_pcf_char_step(slot, codepoint, def_w);
 				current_x += step;
 			}
 		}

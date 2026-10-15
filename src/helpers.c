@@ -1,3 +1,8 @@
+/*
+ * Common functions and helpers
+ * Copyright 2026 Gerard Świderski
+ */
+
 #include <ctype.h>
 
 void unescape_string(char *str)

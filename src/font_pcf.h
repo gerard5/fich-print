@@ -8,26 +8,17 @@
 
 #include <stdint.h>
 
+struct gplane;
+
 #define FREE_PCF_ALL (-1)
-
-struct gplane {
-	uint8_t *pixels;
-	unsigned int width, height;
-	unsigned int stride;
-	size_t stride_bytes;
-	size_t size_bytes;
-	size_t size_area;
-};
-
-typedef struct gplane gplane_t;
 
 int load_pcf(const char *filename, int slot);
 int free_pcf(int slot);
 
-int get_pcf_char_step(int typeface_idx, int codepoint, int default_w);
+int get_pcf_char_step(int slot, int codepoint, int default_w);
 
-int render_char(gplane_t *plane, int typeface_idx, int c, int x, int y, uint8_t color);
-void render_text(gplane_t *plane, int typeface_idx, const char *text, int x, int y, uint8_t color);
-void render_text_format(gplane_t *plane, int typeface_idx, const char *format_str);
+int render_char(struct gplane *plane, int slot, int c, int x, int y, uint8_t color);
+void render_text(struct gplane *plane, int slot, const char *text, int x, int y, uint8_t color);
+void render_text_format(struct gplane *plane, int slot, const char *format_str);
 
 #endif /* end of FONT_BDF_H */
