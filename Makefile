@@ -1,6 +1,8 @@
-SRC := main.c printer.c image.c label.c barcode.c helpers.c font_pcf.c
-SRC += aiyin/aiyin_ops.c aiyin/aiyin_io_fd.c aiyin/aiyin_io_usb.c
-SRC += niimbot/niimbot_ops.c
+SRC := main.c image.c label.c helpers.c font_pcf.c
+SRC += barcode/code128.c barcode/ean.c barcode/itf.c
+SRC += printer/aiyin/aiyin_ops.c printer/aiyin/aiyin_io_fd.c printer/aiyin/aiyin_io_usb.c
+SRC += printer/niimbot/niimbot_ops.c
+SRC += printer/printer.c
 
 TARGET := fichero
 

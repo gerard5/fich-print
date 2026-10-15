@@ -19,9 +19,10 @@
 #include <unistd.h>
 #include <getopt.h>
 
-#include "printer.h"
+#include "printer/printer.h"
+#include "helpers.h"
 #include "label.h"
-#include "barcode.h"
+#include "barcode/barcode.h"
 
 static void print_usage(const char *prog_name)
 {
@@ -35,6 +36,7 @@ static void print_usage(const char *prog_name)
 	printf("  -b, --datamatrix <text>  Print Data Matrix encoding text value\n");
 	printf("  -c, --code128 <text>     Print Code 128 barcode\n");
 	printf("  -3, --ean13 <text>       Print EAN-13 barcode\n");
+	printf("  -8, --ean8 <text>        Print EAN-8 barcode\n");
 	printf("  -5, --ean5 <text>        Print EAN-5 barcode\n");
 	printf("  -I, --itf <text>         Print ITF barcode\n");
 	printf("  -i, --image <file>       Print image loaded from PBM (P1) file\n");
@@ -57,6 +59,7 @@ static const struct option long_options[] = {
 	{ "datamatrix", required_argument, NULL, 'b' },
 	{ "code128", required_argument, NULL, 'c' },
 	{ "ean13", required_argument, NULL, '3' },
+	{ "ean8", required_argument, NULL, '8' },
 	{ "ean5", required_argument, NULL, '5' },
 	{ "image", required_argument, NULL, 'i' },
 	{ "testpattern", no_argument, NULL, 'T' },
@@ -75,6 +78,7 @@ enum {
 	lopt_barcode_128,
 	lopt_barcode_itf,
 	lopt_barcode_ean13,
+	lopt_barcode_ean8,
 	lopt_barcode_ean5,
 };
 
@@ -123,7 +127,7 @@ int main(int argc, char **argv)
 		return EXIT_SUCCESS;
 	}
 
-	while ((opt = getopt_long(argc, argv, "d:m:i:I:D:p:t:f:b:c:3:5:Tsh", long_options, &option_index)) != -1) {
+	while ((opt = getopt_long(argc, argv, "d:m:i:I:D:p:t:f:b:c:3:5:8:Tsh", long_options, &option_index)) != -1) {
 		switch (opt) {
 			case 'd': port_path = optarg; break;
 			case 'm': printer_model = get_printer_model(optarg); break;
@@ -133,6 +137,7 @@ int main(int argc, char **argv)
 			case 'c': LOPT_SET(lopt_barcode_128); break;
 			case 'I': LOPT_SET(lopt_barcode_itf); break;
 			case '3': LOPT_SET(lopt_barcode_ean13); break;
+			case '8': LOPT_SET(lopt_barcode_ean8); break;
 			case '5': LOPT_SET(lopt_barcode_ean5); break;
 			case 'i': LOPT_SET(lopt_image_pbm); break;
 			case 'T': LOPT_SET(lopt_testpattern); break;
@@ -157,14 +162,22 @@ int main(int argc, char **argv)
 	}
 
 	if (lopt_count != 1) {
-		fprintf(stderr, "Error: Print content options t,b,c,3,5,i,T are mutually exclusive.\n");
+		fprintf(stderr, "Error: Print content options t,b,c,3,5,8,i,T are mutually exclusive.\n");
 		print_usage(argv[0]);
 		return EXIT_FAILURE;
 	}
 
+	char *lopt_arg_raw = strdup(lopt_arg);
+	if (lopt_arg_raw == NULL) {
+		fprintf(stderr, "Error: unable to allocate string\n");
+		return EXIT_FAILURE;
+	}
+
+	unescape_string(lopt_arg_raw);
+
 	switch (lopt_typ) {
 		case lopt_text:
-			bitmap_data = build_text_bitmap(lopt_arg, font_path, &height_pels);
+			bitmap_data = build_text_bitmap(lopt_arg_raw, font_path, &height_pels);
 			break;
 		case lopt_image_pbm:
 			bitmap_data = build_pbm_bitmap(lopt_arg, &height_pels);
@@ -173,10 +186,10 @@ int main(int argc, char **argv)
 			bitmap_data = build_testpattern_bitmap(height_pels);
 			break;
 		case lopt_barcode_datamatrix:
-			bitmap_data = build_datamatrix_bitmap(lopt_arg, &height_pels);
+			bitmap_data = build_datamatrix_bitmap(lopt_arg_raw, &height_pels);
 			break;
 		case lopt_barcode_128:
-			bitmap_data = build_code128_bitmap(lopt_arg, 'B', font_path, &height_pels);
+			bitmap_data = build_code128_bitmap(lopt_arg_raw, code128_mode_auto, font_path, &height_pels);
 			break;
 		case lopt_barcode_itf:
 			bitmap_data = build_itf_bitmap(lopt_arg, 0, font_path, &height_pels);
@@ -184,12 +197,18 @@ int main(int argc, char **argv)
 		case lopt_barcode_ean13:
 			bitmap_data = build_ean13_bitmap(lopt_arg, font_path, &height_pels);
 			break;
+		case lopt_barcode_ean8:
+			bitmap_data = build_ean8_bitmap(lopt_arg, font_path, &height_pels);
+			break;
 		case lopt_barcode_ean5:
 			bitmap_data = build_ean5_bitmap(lopt_arg, font_path, &height_pels);
 			break;
 		default:
 			break;
 	}
+
+	free(lopt_arg_raw);
+	lopt_arg_raw = NULL;
 
 	if (bitmap_data == NULL) {
 		fprintf(stderr, "Unable to create bitmap\n");

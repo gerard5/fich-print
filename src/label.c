@@ -11,11 +11,10 @@
 
 #include <dmtx.h>
 
-#include "helpers.h"
-#include "printer.h"
+#include "printer/printer.h"
 #include "image.h"
 #include "font_pcf.h"
-#include "barcode.h"
+#include "barcode/barcode.h"
 #include "label.h"
 
 #define LABEL_WIDTH  (PRINTER_DEFAULT_HEIGHT_PELS)
@@ -87,20 +86,12 @@ unsigned char *build_text_bitmap(const char *text_str, const char *font_path, in
 		return NULL;
 	}
 
-	char *str = strdup(text_str);
-	if (str == NULL) {
-		free_pcf(FREE_PCF_ALL);
-		_log_error("Failed to duplicate text string");
-		return NULL;
-	}
-	unescape_string(str);
-
 	static struct gplane plane = { 0 };
 	plane.width = (*target_height_pels > 0) ?
 		*target_height_pels :
 		0;
 
-	render_text_format(&plane, 0, str);
+	render_text_format(&plane, 0, text_str);
 
 	if (plane.width < 32) {
 		plane.width = 32;
@@ -108,7 +99,6 @@ unsigned char *build_text_bitmap(const char *text_str, const char *font_path, in
 
 	if (plane.height > PRINTER_WIDTH_PELS) {
 		_log_error("Label text is (%d px) too high for %d px printer head!", plane.height, PRINTER_WIDTH_PELS);
-		free(str);
 		free_pcf(FREE_PCF_ALL);
 		return NULL;
 	}
@@ -117,7 +107,6 @@ unsigned char *build_text_bitmap(const char *text_str, const char *font_path, in
 	int height = PRINTER_WIDTH_PELS;
 
 	if (plane_alloc(&plane, NULL, width, height) < 0) {
-		free(str);
 		free_pcf(FREE_PCF_ALL);
 		_log_error("Failed to allocate bitmap memory for label");
 		return NULL;
@@ -125,8 +114,7 @@ unsigned char *build_text_bitmap(const char *text_str, const char *font_path, in
 
 	memset(plane.pixels, PIXEL_WHITE, plane.size_bytes);
 
-	render_text_format(&plane, 0, str);
-	free(str);
+	render_text_format(&plane, 0, text_str);
 	free_pcf(FREE_PCF_ALL);
 
 	*target_height_pels = width;
@@ -139,7 +127,7 @@ unsigned char *build_text_bitmap(const char *text_str, const char *font_path, in
 unsigned char *build_datamatrix_bitmap(const char *text_str, int *out_height_pels)
 {
 	static struct gplane plane;
-	if (plane_alloc(&plane, NULL, LABEL_WIDTH, LABEL_HEIGHT) < 0) {
+	if (plane_alloc(&plane, NULL, *out_height_pels, LABEL_HEIGHT) < 0) {
 		_log_error("Failed to allocate bitmap memory for label");
 		return NULL;
 	}
@@ -195,7 +183,7 @@ unsigned char *build_datamatrix_bitmap(const char *text_str, int *out_height_pel
 
 	dmtxEncodeDestroy(&enc);
 
-	*out_height_pels = PRINTER_DEFAULT_HEIGHT_PELS;
+	/* *out_height_pels = PRINTER_DEFAULT_HEIGHT_PELS; */
 	unsigned char *bitmap_data = plane_to_bitmap(&plane);
 	plane_free(&plane);
 
@@ -206,11 +194,26 @@ unsigned char *build_ean13_bitmap(const char *text_str, const char *font_path, i
 {
 	struct gplane plane;
 
-	if (create_barcode_EAN13(&plane, text_str, font_path, LABEL_WIDTH, LABEL_HEIGHT) < 0) {
+	if (create_barcode_EAN13(&plane, text_str, font_path, *out_height_pels, LABEL_HEIGHT) < 0) {
 		return NULL;
 	}
 
-	*out_height_pels = PRINTER_DEFAULT_HEIGHT_PELS;
+	/* *out_height_pels = PRINTER_DEFAULT_HEIGHT_PELS; */
+	unsigned char *bitmap_data = plane_to_bitmap(&plane);
+	plane_free(&plane);
+
+	return bitmap_data;
+}
+
+unsigned char *build_ean8_bitmap(const char *text_str, const char *font_path, int *out_height_pels)
+{
+	struct gplane plane;
+
+	if (create_barcode_EAN8(&plane, text_str, font_path, *out_height_pels, LABEL_HEIGHT) < 0) {
+		return NULL;
+	}
+
+	/* *out_height_pels = PRINTER_DEFAULT_HEIGHT_PELS; */
 	unsigned char *bitmap_data = plane_to_bitmap(&plane);
 	plane_free(&plane);
 
@@ -221,11 +224,11 @@ unsigned char *build_ean5_bitmap(const char *text_str, const char *font_path, in
 {
 	struct gplane plane;
 
-	if (create_barcode_EAN5(&plane, text_str, font_path, LABEL_WIDTH, LABEL_HEIGHT) < 0) {
+	if (create_barcode_EAN5(&plane, text_str, font_path, *out_height_pels, LABEL_HEIGHT) < 0) {
 		return NULL;
 	}
 
-	*out_height_pels = PRINTER_DEFAULT_HEIGHT_PELS;
+	/* *out_height_pels = PRINTER_DEFAULT_HEIGHT_PELS; */
 	unsigned char *bitmap_data = plane_to_bitmap(&plane);
 	plane_free(&plane);
 
@@ -236,11 +239,11 @@ unsigned char *build_itf_bitmap(const char *text_str, int use_checksum, const ch
 {
 	struct gplane plane;
 
-	if (create_barcode_ITF(&plane, text_str, (use_checksum != 0), font_path, LABEL_WIDTH, LABEL_HEIGHT) < 0) {
+	if (create_barcode_ITF(&plane, text_str, (use_checksum != 0), font_path, *out_height_pels, LABEL_HEIGHT) < 0) {
 		return NULL;
 	}
 
-	*out_height_pels = PRINTER_DEFAULT_HEIGHT_PELS;
+	/* *out_height_pels = PRINTER_DEFAULT_HEIGHT_PELS; */
 	unsigned char *bitmap_data = plane_to_bitmap(&plane);
 	plane_free(&plane);
 
@@ -251,11 +254,11 @@ unsigned char *build_code128_bitmap(const char *text_str, char mode, const char 
 {
 	struct gplane plane;
 
-	if (create_barcode_CODE128(&plane, text_str, mode, font_path, LABEL_WIDTH, LABEL_HEIGHT) < 0) {
+	if (create_barcode_CODE128(&plane, text_str, mode, font_path, *out_height_pels, LABEL_HEIGHT) < 0) {
 		return NULL;
 	}
 
-	*out_height_pels = PRINTER_DEFAULT_HEIGHT_PELS;
+	/* *out_height_pels = PRINTER_DEFAULT_HEIGHT_PELS; */
 	unsigned char *bitmap_data = plane_to_bitmap(&plane);
 	plane_free(&plane);
 

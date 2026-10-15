@@ -8,11 +8,19 @@
 
 #include <stdbool.h>
 
+enum code128_mode {
+	code128_mode_auto = 0,
+	code128_mode_a,
+	code128_mode_b,
+	code128_mode_c
+};
+
 struct gplane;
 
 int create_barcode_EAN13(struct gplane *plane, const char *text_str, const char *font_path, int width, int height);
+int create_barcode_EAN8(struct gplane *plane, const char *text_str, const char *font_path, int width, int height);
 int create_barcode_EAN5(struct gplane *plane, const char *text_str, const char *font_path, int width, int height);
 int create_barcode_ITF(struct gplane *plane, const char *text_str, bool use_checksum, const char *font_path, int width, int height);
-int create_barcode_CODE128(struct gplane *plane, const char *text_str, char mode, const char *font_path, int width, int height);
+int create_barcode_CODE128(struct gplane *plane, const char *text_str, int mode, const char *font_path, int width, int height);
 
 #endif /* end of BARCODE_H */
