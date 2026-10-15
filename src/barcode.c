@@ -10,16 +10,8 @@
 #include <string.h>
 #include <ctype.h>
 
-#include "helpers.h"
-#include "printer.h"
 #include "font_pcf.h"
-#include "label.h"
 #include "barcode.h"
-
-#define LABEL_WIDTH  (PRINTER_DEFAULT_HEIGHT_PELS)
-#define LABEL_HEIGHT (PRINTER_WIDTH_PELS)
-
-extern unsigned char *convert_to_monobitmap(gplane_t *plane);
 
 /* 1D Barcode encoding and rendering helpers */
 static const char *eans_l_codes[10] = {
@@ -82,19 +74,23 @@ static const char *code128_patterns[107] = {
 	"11010011100", "1100011101011"
 };
 
-unsigned char *build_ean13_bitmap(const char *text_str, const char *font_path, int *out_height_pels)
+int create_barcode_EAN13(struct gplane *plane, const char *text_str, const char *font_path, int width, int height)
 {
+	if (font_path == NULL || text_str == NULL) {
+		return -1;
+	}
+
 	size_t len = strlen(text_str);
 	if (len < 12 || len > 13) {
 		fprintf(stderr, "Error: EAN-13 requires 12 or 13 digits\n");
-		return NULL;
+		return -1;
 	}
 
 	char digits[14];
 	for (size_t i = 0; i < len; i++) {
 		if (!isdigit((unsigned char)text_str[i])) {
 			fprintf(stderr, "Error: EAN-13 input must be numeric digits only\n");
-			return NULL;
+			return -1;
 		}
 		digits[i] = text_str[i];
 	}
@@ -119,11 +115,11 @@ unsigned char *build_ean13_bitmap(const char *text_str, const char *font_path, i
 		digits[13] = '\0';
 	}
 
-	uint8_t *label_buf = malloc(LABEL_WIDTH * LABEL_HEIGHT * sizeof(uint8_t));
+	uint8_t *label_buf = malloc(width * height * sizeof(uint8_t));
 	if (label_buf == NULL) {
-		return NULL;
+		return -1;
 	}
-	memset(label_buf, 0xff, LABEL_WIDTH * LABEL_HEIGHT * sizeof(uint8_t));
+	memset(label_buf, 0xff, width * height * sizeof(uint8_t));
 
 	char pattern[128] = "";
 	int first_digit = digits[0] - '0';
@@ -153,11 +149,11 @@ unsigned char *build_ean13_bitmap(const char *text_str, const char *font_path, i
 	int module_width = 2;
 	int total_modules = (int)strlen(pattern);
 	int barcode_width = total_modules * module_width;
-	int data_bar_height = 56;
-	int guard_bar_height = 64;
+	int data_bar_height = height - 35;
+	int guard_bar_height = height - 25;
 
-	int start_x = (LABEL_WIDTH - barcode_width) / 2;
-	int start_y = 1;
+	int start_x = (width - barcode_width) / 2;
+	int start_y = 0;
 
 	for (int m = 0; m < total_modules; m++) {
 		if (pattern[m] == '1') {
@@ -168,64 +164,65 @@ unsigned char *build_ean13_bitmap(const char *text_str, const char *font_path, i
 				int x = start_x + m * module_width + w;
 				for (int y = 0; y < bar_height; y++) {
 					int py = start_y + y;
-					if (x >= 0 && x < LABEL_WIDTH && py >= 0 && py < LABEL_HEIGHT) {
-						label_buf[py * LABEL_WIDTH + x] = 0;
+					if (x >= 0 && x < width && py >= 0 && py < height) {
+						label_buf[py * width + x] = 0;
 					}
 				}
 			}
 		}
 	}
 
-	static gplane_t plane;
-	unsigned char *bitmap_data = NULL;
+	char first_txt[2] = { digits[0], '\0' };
+	char left_txt[7];
+	strncpy(left_txt, digits + 1, 6);
+	left_txt[6] = '\0';
+	char right_txt[7];
+	strncpy(right_txt, digits + 7, 6);
+	right_txt[6] = '\0';
 
-	if (font_path && load_pcf(font_path, 0) == 0) {
-		plane.pixels = label_buf;
-		plane.width = LABEL_WIDTH;
-		plane.height = LABEL_HEIGHT;
-		plane.stride = LABEL_WIDTH;
+	int text_y = start_y + data_bar_height;
 
-		char first_txt[2] = { digits[0], '\0' };
-		char left_txt[7];
-		strncpy(left_txt, digits + 1, 6);
-		left_txt[6] = '\0';
-		char right_txt[7];
-		strncpy(right_txt, digits + 7, 6);
-		right_txt[6] = '\0';
-
-		int text_y = start_y + data_bar_height + 4;
-		render_text(&plane, 0, first_txt, start_x - 14, text_y, 0);
-		render_text(&plane, 0, left_txt, start_x + 10, text_y, 0);
-		render_text(&plane, 0, right_txt, start_x + 106, text_y, 0);
-		free_pcf(FREE_PCF_ALL);
-
-		*out_height_pels = PRINTER_DEFAULT_HEIGHT_PELS;
-		bitmap_data = convert_to_monobitmap(&plane);
+	if (load_pcf(font_path, 0) != 0) {
+		free(label_buf);
+		return -1;
 	}
 
-	free(label_buf);
-	return bitmap_data;
+	plane->pixels = label_buf;
+	plane->width = width;
+	plane->height = height;
+	plane->stride = width * sizeof(uint8_t);
+
+	render_text(plane, 0, first_txt, start_x - 14, text_y, 0);
+	render_text(plane, 0, left_txt, start_x + 10, text_y, 0);
+	render_text(plane, 0, right_txt, start_x + 106, text_y, 0);
+	free_pcf(FREE_PCF_ALL);
+
+	return 0;
 }
 
-unsigned char *build_ean5_bitmap(const char *text_str, const char *font_path, int *out_height_pels)
+int create_barcode_EAN5(struct gplane *plane, const char *text_str, const char *font_path, int width, int height)
 {
+	if (font_path == NULL || text_str == NULL) {
+		return -1;
+	}
+
 	if (strlen(text_str) < 5) {
 		fprintf(stderr, "Error: EAN-5 requires 5 digits\n");
-		return NULL;
+		return -1;
 	}
 
 	for (int i = 0; i < 5; i++) {
 		if (!isdigit((unsigned char)text_str[i])) {
 			fprintf(stderr, "Error: EAN-5 input must be numeric digits only\n");
-			return NULL;
+			return -1;
 		}
 	}
 
-	uint8_t *label_buf = malloc(LABEL_WIDTH * LABEL_HEIGHT * sizeof(uint8_t));
+	uint8_t *label_buf = malloc(width * height * sizeof(uint8_t));
 	if (label_buf == NULL) {
-		return NULL;
+		return -1;
 	}
-	memset(label_buf, 0xff, LABEL_WIDTH * LABEL_HEIGHT * sizeof(uint8_t));
+	memset(label_buf, 0xff, width * height * sizeof(uint8_t));
 
 	int d1 = text_str[0] - '0';
 	int d2 = text_str[1] - '0';
@@ -259,10 +256,10 @@ unsigned char *build_ean5_bitmap(const char *text_str, const char *font_path, in
 	int module_width = 2;
 	int total_modules = (int)strlen(pattern);
 	int barcode_width = total_modules * module_width;
-	int barcode_height = 56;
+	int barcode_height = height - 35;
 
-	int start_x = (LABEL_WIDTH - barcode_width) / 2;
-	int start_y = 1;
+	int start_x = (width - barcode_width) / 2;
+	int start_y = 0;
 
 	for (int m = 0; m < total_modules; m++) {
 		if (pattern[m] == '1') {
@@ -270,35 +267,32 @@ unsigned char *build_ean5_bitmap(const char *text_str, const char *font_path, in
 				int x = start_x + m * module_width + w;
 				for (int y = 0; y < barcode_height; y++) {
 					int py = start_y + y;
-					if (x >= 0 && x < LABEL_WIDTH && py >= 0 && py < LABEL_HEIGHT) {
-						label_buf[py * LABEL_WIDTH + x] = 0;
+					if (x >= 0 && x < width && py >= 0 && py < height) {
+						label_buf[py * width + x] = 0;
 					}
 				}
 			}
 		}
 	}
 
-	static gplane_t plane;
-	unsigned char *bitmap_data = NULL;
+	char txt[6];
+	strncpy(txt, text_str, 5);
+	txt[5] = '\0';
 
-	if (font_path && load_pcf(font_path, 0) == 0) {
-		plane.pixels = label_buf;
-		plane.width = LABEL_WIDTH;
-		plane.height = LABEL_HEIGHT;
-		plane.stride = LABEL_WIDTH;
-
-		char txt[6];
-		strncpy(txt, text_str, 5);
-		txt[5] = '\0';
-		render_text(&plane, 0, txt, start_x + 18, start_y + barcode_height + 4, 0);
-		free_pcf(FREE_PCF_ALL);
-
-		*out_height_pels = PRINTER_DEFAULT_HEIGHT_PELS;
-		bitmap_data = convert_to_monobitmap(&plane);
+	if (load_pcf(font_path, 0) != 0) {
+		free(label_buf);
+		return -1;
 	}
 
-	free(label_buf);
-	return bitmap_data;
+	plane->pixels = label_buf;
+	plane->width = width;
+	plane->height = height;
+	plane->stride = width * sizeof(uint8_t);
+
+	render_text(plane, 0, txt, start_x + 18, start_y + barcode_height, 0);
+	free_pcf(FREE_PCF_ALL);
+
+	return 0;
 }
 
 /* Modulo 10 checksum (optional) */
@@ -317,8 +311,12 @@ static int calculate_itf_checksum(const char *text)
 	return next_ten - sum;
 }
 
-unsigned char *build_itf_bitmap(const char *text_str, int use_checksum, const char *font_path, int *out_height_pels)
+int create_barcode_ITF(struct gplane *plane, const char *text_str, bool use_checksum, const char *font_path, int width, int height)
 {
+	if (font_path == NULL || text_str == NULL) {
+		return -1;
+	}
+
 	char pattern[4096] = { 0 };
 	char full_text[256] = { 0 };
 	strncpy(full_text, text_str, sizeof(full_text) - 2);
@@ -327,12 +325,12 @@ unsigned char *build_itf_bitmap(const char *text_str, int use_checksum, const ch
 	size_t len = strlen(full_text);
 	if (len == 0) {
 		fprintf(stderr, "Error: ITF input cannot be empty\n");
-		return NULL;
+		return -1;
 	}
 	for (size_t i = 0; i < len; i++) {
 		if (full_text[i] < '0' || full_text[i] > '9') {
 			fprintf(stderr, "Error: ITF supports digits only\n");
-			return NULL;
+			return -1;
 		}
 	}
 
@@ -349,11 +347,11 @@ unsigned char *build_itf_bitmap(const char *text_str, int use_checksum, const ch
 		len++;
 	}
 
-	uint8_t *label_buf = malloc(LABEL_WIDTH * LABEL_HEIGHT * sizeof(uint8_t));
+	uint8_t *label_buf = malloc(width * height * sizeof(uint8_t));
 	if (label_buf == NULL) {
-		return NULL;
+		return -1;
 	}
-	memset(label_buf, 0xff, LABEL_WIDTH * LABEL_HEIGHT * sizeof(uint8_t));
+	memset(label_buf, 0xff, width * height * sizeof(uint8_t));
 
 	/* Start pattern */
 	strcat(pattern, "1010");
@@ -389,18 +387,18 @@ unsigned char *build_itf_bitmap(const char *text_str, int use_checksum, const ch
 	strcat(pattern, "1101");
 
 	int total_modules = (int)strlen(pattern);
-	int module_width = (total_modules * 2 <= (LABEL_WIDTH - 16)) ? 2 : 1;
+	int module_width = (total_modules * 2 <= (width - 16)) ? 2 : 1;
 	int barcode_width = total_modules * module_width;
 
-	if (barcode_width > LABEL_WIDTH) {
-		fprintf(stderr, "Error: ITF width (%d px) exceeds label width (%d px)\n", barcode_width, LABEL_WIDTH);
+	if (barcode_width > width) {
+		fprintf(stderr, "Error: ITF width (%d px) exceeds label width (%d px)\n", barcode_width, width);
 		free(label_buf);
-		return NULL;
+		return -1;
 	}
 
 	int barcode_height = 56;
-	int start_x = (LABEL_WIDTH - barcode_width) / 2;
-	int start_y = 1;
+	int start_x = (width - barcode_width) / 2;
+	int start_y = 0;
 
 	for (int m = 0; m < total_modules; m++) {
 		if (pattern[m] == '1') {
@@ -408,50 +406,52 @@ unsigned char *build_itf_bitmap(const char *text_str, int use_checksum, const ch
 				int x = start_x + m * module_width + w;
 				for (int y = 0; y < barcode_height; y++) {
 					int py = start_y + y;
-					if (x >= 0 && x < LABEL_WIDTH && py >= 0 && py < LABEL_HEIGHT) {
-						label_buf[py * LABEL_WIDTH + x] = 0;
+					if (x >= 0 && x < width && py >= 0 && py < height) {
+						label_buf[py * width + x] = 0;
 					}
 				}
 			}
 		}
 	}
 
-	static gplane_t plane;
-	unsigned char *bitmap_data = NULL;
-
-	if (font_path && load_pcf(font_path, 0) == 0) {
-		plane.pixels = label_buf;
-		plane.width = LABEL_WIDTH;
-		plane.height = LABEL_HEIGHT;
-		plane.stride = LABEL_WIDTH;
-
-		int text_width = 0;
-		for (size_t j = 0; j < strlen(full_text); j++) {
-			text_width += get_pcf_char_step(0, (unsigned char)full_text[j], 8);
-		}
-
-		int text_x = (LABEL_WIDTH - text_width) / 2;
-		if (text_x < 2)
-			text_x = 2;
-		render_text(&plane, 0, full_text, text_x, start_y + barcode_height + 4, 0);
-		free_pcf(FREE_PCF_ALL);
-
-		*out_height_pels = PRINTER_DEFAULT_HEIGHT_PELS;
-		bitmap_data = convert_to_monobitmap(&plane);
+	if (load_pcf(font_path, 0) != 0) {
+		free(label_buf);
+		return -1;
 	}
 
-	free(label_buf);
-	return bitmap_data;
+	plane->pixels = label_buf;
+	plane->width = width;
+	plane->height = height;
+	plane->stride = width * sizeof(uint8_t);
+
+	int text_width = 0;
+	for (size_t j = 0; j < strlen(full_text); j++) {
+		text_width += get_pcf_char_step(0, (unsigned char)full_text[j], 8);
+	}
+
+	int text_x = (width - text_width) / 2;
+	if (text_x < 2) {
+		text_x = 2;
+	}
+
+	render_text(plane, 0, full_text, text_x, start_y + barcode_height + 4, 0);
+	free_pcf(FREE_PCF_ALL);
+
+	return 0;
 }
 
-unsigned char *build_code128_bitmap(const char *text_str, char mode, const char *font_path, int *out_height_pels)
+int create_barcode_CODE128(struct gplane *plane, const char *text_str, char mode, const char *font_path, int width, int height)
 {
+	if (font_path == NULL || text_str == NULL) {
+		return -1;
+	}
+
 	char pattern[2048] = { 0 };
 
 	size_t len = strlen(text_str);
 	if (len == 0) {
 		fprintf(stderr, "Error: Code 128 input cannot be empty\n");
-		return NULL;
+		return -1;
 	}
 
 	mode |= 0x20; /* lower case */
@@ -459,12 +459,12 @@ unsigned char *build_code128_bitmap(const char *text_str, char mode, const char 
 	if (mode == 'c') {
 		if (len % 2 != 0) {
 			fprintf(stderr, "Error: Code 128C requires an even number of digits\n");
-			return NULL;
+			return -1;
 		}
 		for (size_t i = 0; i < len; i++) {
 			if (text_str[i] < '0' || text_str[i] > '9') {
 				fprintf(stderr, "Error: Code 128C supports digits only ('%c' found)\n", text_str[i]);
-				return NULL;
+				return -1;
 			}
 		}
 	}
@@ -473,7 +473,7 @@ unsigned char *build_code128_bitmap(const char *text_str, char mode, const char 
 			unsigned char ch = (unsigned char)text_str[i];
 			if (ch > 95) {
 				fprintf(stderr, "Error: Unsupported Code 128A character '%c'\n", ch);
-				return NULL;
+				return -1;
 			}
 		}
 	}
@@ -482,20 +482,20 @@ unsigned char *build_code128_bitmap(const char *text_str, char mode, const char 
 			unsigned char ch = (unsigned char)text_str[i];
 			if (ch < 32 || ch > 126) {
 				fprintf(stderr, "Error: Unsupported Code 128B character '%c' (ASCII %d)\n", ch, ch);
-				return NULL;
+				return -1;
 			}
 		}
 	}
 	else {
 		fprintf(stderr, "Error: Unsupported Code 128 mode '%c'\n", mode);
-		return NULL;
+		return -1;
 	}
 
-	uint8_t *label_buf = malloc(LABEL_WIDTH * LABEL_HEIGHT * sizeof(uint8_t));
+	uint8_t *label_buf = malloc(width * height * sizeof(uint8_t));
 	if (label_buf == NULL) {
-		return NULL;
+		return -1;
 	}
-	memset(label_buf, 0xff, LABEL_WIDTH * LABEL_HEIGHT * sizeof(uint8_t));
+	memset(label_buf, 0xff, width * height * sizeof(uint8_t));
 
 	int start_val = (mode == 'a') ? 103 : ((mode == 'b') ? 104 : 105);
 	int checksum = start_val;
@@ -532,18 +532,18 @@ unsigned char *build_code128_bitmap(const char *text_str, char mode, const char 
 	strcat(pattern, code128_patterns[106]);
 
 	int total_modules = (int)strlen(pattern);
-	int module_width = (total_modules * 2 <= (LABEL_WIDTH - 16)) ? 2 : 1;
+	int module_width = (total_modules * 2 <= (width - 16)) ? 2 : 1;
 	int barcode_width = total_modules * module_width;
 
-	if (barcode_width > LABEL_WIDTH) {
-		fprintf(stderr, "Error: Code 128 barcode width (%d px) exceeds label width (%d px)\n", barcode_width, LABEL_WIDTH);
+	if (barcode_width > width) {
+		fprintf(stderr, "Error: Code 128 barcode width (%d px) exceeds label width (%d px)\n", barcode_width, width);
 		free(label_buf);
-		return NULL;
+		return -1;
 	}
 
-	int barcode_height = 56;
-	int start_x = (LABEL_WIDTH - barcode_width) / 2;
-	int start_y = 1;
+	int barcode_height = height - 35;
+	int start_x = (width - barcode_width) / 2;
+	int start_y = 0;
 
 	for (int m = 0; m < total_modules; m++) {
 		if (pattern[m] == '1') {
@@ -551,39 +551,36 @@ unsigned char *build_code128_bitmap(const char *text_str, char mode, const char 
 				int x = start_x + m * module_width + w;
 				for (int y = 0; y < barcode_height; y++) {
 					int py = start_y + y;
-					if (x >= 0 && x < LABEL_WIDTH && py >= 0 && py < LABEL_HEIGHT) {
-						label_buf[py * LABEL_WIDTH + x] = 0;
+					if (x >= 0 && x < width && py >= 0 && py < height) {
+						label_buf[py * width + x] = 0;
 					}
 				}
 			}
 		}
 	}
 
-	static gplane_t plane;
-	unsigned char *bitmap_data = NULL;
-
-	if (font_path && load_pcf(font_path, 0) == 0) {
-		plane.pixels = label_buf;
-		plane.width = LABEL_WIDTH;
-		plane.height = LABEL_HEIGHT;
-		plane.stride = LABEL_WIDTH;
-
-		int text_width = 0;
-		for (size_t j = 0; j < len; j++) {
-			text_width += get_pcf_char_step(0, (unsigned char)text_str[j], 8);
-		}
-
-		int text_x = (LABEL_WIDTH - text_width) / 2;
-		if (text_x < 2) {
-			text_x = 2;
-		}
-		render_text(&plane, 0, text_str, text_x, start_y + barcode_height + 4, 0);
-		free_pcf(FREE_PCF_ALL);
-
-		*out_height_pels = PRINTER_DEFAULT_HEIGHT_PELS;
-		bitmap_data = convert_to_monobitmap(&plane);
+	if (load_pcf(font_path, 0) != 0) {
+		free(label_buf);
+		return -1;
 	}
 
-	free(label_buf);
-	return bitmap_data;
+	plane->pixels = label_buf;
+	plane->width = width;
+	plane->height = height;
+	plane->stride = width * sizeof(uint8_t);
+
+	int text_width = 0;
+	for (size_t j = 0; j < len; j++) {
+		text_width += get_pcf_char_step(0, (unsigned char)text_str[j], 8);
+	}
+
+	int text_x = (width - text_width) / 2;
+	if (text_x < 2) {
+		text_x = 2;
+	}
+
+	render_text(plane, 0, text_str, text_x, start_y + barcode_height, 0);
+	free_pcf(FREE_PCF_ALL);
+
+	return 0;
 }

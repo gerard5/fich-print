@@ -16,6 +16,7 @@
 #include "printer.h"
 #include "font_pcf.h"
 #include "label.h"
+#include "barcode.h"
 
 #define LABEL_WIDTH  (PRINTER_DEFAULT_HEIGHT_PELS)
 #define LABEL_HEIGHT (PRINTER_WIDTH_PELS)
@@ -66,19 +67,19 @@ static void pbm_skip_comments(FILE *f)
 	}
 }
 
-unsigned char *load_pbm_file(const char *filename, int *out_height)
+int load_pbm_file(gplane_t *plane, const char *filename)
 {
 	FILE *f = fopen(filename, "r");
 	if (f == NULL) {
 		perror("Failed to open PBM file");
-		return NULL;
+		return -1;
 	}
 
 	char magic[3];
 	if (fscanf(f, "%2s", magic) != 1 || magic[0] != 'P' || magic[1] != '1') {
 		fprintf(stderr, "Invalid or unsupported PBM format (expected P1)\n");
 		fclose(f);
-		return NULL;
+		return -1;
 	}
 
 	pbm_skip_comments(f);
@@ -86,20 +87,14 @@ unsigned char *load_pbm_file(const char *filename, int *out_height)
 	if (fscanf(f, "%d %d", &width, &height) != 2) {
 		fprintf(stderr, "Failed to read PBM dimensions\n");
 		fclose(f);
-		return NULL;
-	}
-
-	if (height != PRINTER_WIDTH_PELS) {
-		fprintf(stderr, "Error: PBM height is %d pixels, printer expects exactly %d pixels\n", height, PRINTER_WIDTH_PELS);
-		fclose(f);
-		return NULL;
+		return -1;
 	}
 
 	unsigned char *label_buf = (unsigned char *)calloc(1, width * height);
 	if (label_buf == NULL) {
 		perror("Failed to allocate bitmap memory for PBM");
 		fclose(f);
-		return NULL;
+		return -1;
 	}
 
 	int total_pixels = width * height;
@@ -125,7 +120,7 @@ unsigned char *load_pbm_file(const char *filename, int *out_height)
 			fprintf(stderr, "Unexpected character '%c' in PBM data at pixel %d\n", ch, pixels_read);
 			free(label_buf);
 			fclose(f);
-			return NULL;
+			return -1;
 		}
 	}
 
@@ -133,29 +128,47 @@ unsigned char *load_pbm_file(const char *filename, int *out_height)
 		fprintf(stderr, "Unexpected end of PBM data. Read %d of %d pixels\n", pixels_read, total_pixels);
 		free(label_buf);
 		fclose(f);
-		return NULL;
+		return -1;
 	}
 
 	fclose(f);
 
-	gplane_t plane;
-	plane.pixels = (uint8_t *)label_buf;
-	plane.width = width;
-	plane.height = height;
-	plane.stride = width;
-	plane.stride_bytes = width * sizeof(uint8_t);
-	plane.size_bytes = width * height * sizeof(uint8_t);
-	plane.size_area = width * height;
+	plane->pixels = (uint8_t *)label_buf;
+	plane->width = width;
+	plane->height = height;
+	plane->stride = width;
+	plane->stride_bytes = width * sizeof(uint8_t);
+	plane->size_bytes = width * height * sizeof(uint8_t);
+	plane->size_area = width * height;
 
-	*out_height = width;
+	return 0;
+}
+
+unsigned char *build_pbm_bitmap(const char *filename, int *out_height_pels)
+{
+	gplane_t plane;
+
+	if (load_pbm_file(&plane, filename) < 0) {
+		return NULL;
+	}
+
+	if (plane.height != PRINTER_WIDTH_PELS) {
+		fprintf(stderr, "Error: PBM height is %d pixels, printer expects exactly %d pixels\n", plane.height, PRINTER_WIDTH_PELS);
+		free(plane.pixels);
+
+		return NULL;
+	}
+
+	*out_height_pels = PRINTER_DEFAULT_HEIGHT_PELS;
 	unsigned char *bitmap_data = convert_to_monobitmap(&plane);
 
-	free(label_buf);
+	free(plane.pixels);
 
 	return bitmap_data;
 }
 
-unsigned char *generate_test_pattern(int height_pels)
+
+unsigned char *build_testpattern_bitmap(int height_pels)
 {
 	gplane_t plane = { 0 };
 
@@ -323,6 +336,70 @@ unsigned char *build_datamatrix_bitmap(const char *text_str, int *out_height_pel
 	unsigned char *bitmap_data = convert_to_monobitmap(&plane);
 
 	free(label_buf);
+	return bitmap_data;
+}
+
+unsigned char *build_ean13_bitmap(const char *text_str, const char *font_path, int *out_height_pels)
+{
+	gplane_t plane;
+
+	if (create_barcode_EAN13(&plane, text_str, font_path, LABEL_WIDTH, LABEL_HEIGHT) < 0) {
+		return NULL;
+	}
+
+	*out_height_pels = PRINTER_DEFAULT_HEIGHT_PELS;
+	unsigned char *bitmap_data = convert_to_monobitmap(&plane);
+
+	free(plane.pixels);
+
+	return bitmap_data;
+}
+
+unsigned char *build_ean5_bitmap(const char *text_str, const char *font_path, int *out_height_pels)
+{
+	gplane_t plane;
+
+	if (create_barcode_EAN5(&plane, text_str, font_path, LABEL_WIDTH, LABEL_HEIGHT) < 0) {
+		return NULL;
+	}
+
+	*out_height_pels = PRINTER_DEFAULT_HEIGHT_PELS;
+	unsigned char *bitmap_data = convert_to_monobitmap(&plane);
+
+	free(plane.pixels);
+
+	return bitmap_data;
+}
+
+unsigned char *build_itf_bitmap(const char *text_str, int use_checksum, const char *font_path, int *out_height_pels)
+{
+	gplane_t plane;
+
+	if (create_barcode_ITF(&plane, text_str, (use_checksum != 0), font_path, LABEL_WIDTH, LABEL_HEIGHT) < 0) {
+		return NULL;
+	}
+
+	*out_height_pels = PRINTER_DEFAULT_HEIGHT_PELS;
+	unsigned char *bitmap_data = convert_to_monobitmap(&plane);
+
+	free(plane.pixels);
+
+	return bitmap_data;
+}
+
+unsigned char *build_code128_bitmap(const char *text_str, char mode, const char *font_path, int *out_height_pels)
+{
+	gplane_t plane;
+
+	if (create_barcode_CODE128(&plane, text_str, mode, font_path, LABEL_WIDTH, LABEL_HEIGHT) < 0) {
+		return NULL;
+	}
+
+	*out_height_pels = PRINTER_DEFAULT_HEIGHT_PELS;
+	unsigned char *bitmap_data = convert_to_monobitmap(&plane);
+
+	free(plane.pixels);
+
 	return bitmap_data;
 }
 

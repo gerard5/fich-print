@@ -167,10 +167,10 @@ int main(int argc, char **argv)
 			bitmap_data = build_text_bitmap(lopt_arg, font_path, &height_pels);
 			break;
 		case lopt_image_pbm:
-			bitmap_data = load_pbm_file(lopt_arg, &height_pels);
+			bitmap_data = build_pbm_bitmap(lopt_arg, &height_pels);
 			break;
 		case lopt_testpattern:
-			bitmap_data = generate_test_pattern(height_pels);
+			bitmap_data = build_testpattern_bitmap(height_pels);
 			break;
 		case lopt_barcode_datamatrix:
 			bitmap_data = build_datamatrix_bitmap(lopt_arg, &height_pels);
