@@ -4,6 +4,7 @@
  */
 
 #include <ctype.h>
+#include <string.h>
 
 void unescape_string(char *str)
 {
@@ -81,5 +82,21 @@ void unescape_string(char *str)
 		}
 		src++;
 	}
-	*dst = '\0';
+
+	while (dst < src) {
+		*(dst++) = '\0';
+	}
+}
+
+char *unescape_string_dup(const char *src)
+{
+	char *dst = (src != NULL) ?
+		strdup(src) :
+		NULL;
+
+	if (dst != NULL) {
+		unescape_string(dst);
+	}
+
+	return dst;
 }

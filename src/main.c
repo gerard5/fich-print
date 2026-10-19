@@ -167,13 +167,14 @@ int main(int argc, char **argv)
 		return EXIT_FAILURE;
 	}
 
-	char *lopt_arg_raw = strdup(lopt_arg);
-	if (lopt_arg_raw == NULL) {
-		fprintf(stderr, "Error: unable to allocate string\n");
-		return EXIT_FAILURE;
+	char *lopt_arg_raw = NULL;
+	if (lopt_arg != NULL) {
+		lopt_arg_raw = unescape_string_dup(lopt_arg);
+		if (lopt_arg_raw == NULL) {
+			fprintf(stderr, "Error: unable to allocate string\n");
+			return EXIT_FAILURE;
+		}
 	}
-
-	unescape_string(lopt_arg_raw);
 
 	switch (lopt_typ) {
 		case lopt_text:

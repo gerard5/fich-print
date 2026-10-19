@@ -7,5 +7,6 @@
 #define HELPERS_H
 
 void unescape_string(char *str);
+char *unescape_string_dup(const char *src);
 
 #endif /* end of HELPERS_H */
