@@ -486,7 +486,6 @@ void render_text_format(struct gplane *plane, int slot, const char *format_str)
 
 	int def_h = tf->default_height;
 	int def_w = tf->default_width;
-	int base_x = 0;
 
 	int lines_count = 0;
 	const char *count_ptr = format_str;
@@ -497,13 +496,11 @@ void render_text_format(struct gplane *plane, int slot, const char *format_str)
 	}
 
 	int total_text_block_height = (lines_count + 1) * def_h;
-
 	int base_y = 0;
 	if (!dry_run) {
 		base_y = ((int)plane->height - total_text_block_height) / 2;
 		base_y -= 5;
 	}
-
 
 	bool is_bold = false;
 	const char *ptr = format_str;
@@ -515,70 +512,99 @@ void render_text_format(struct gplane *plane, int slot, const char *format_str)
 		while (*line_end != '\n' && *line_end != '\0') {
 			line_end++;
 		}
+		int left_width = 0;
+		int center_width = 0;
+		int right_width = 0;
 
-		char current_align = 'c';
-		if (*ptr != '\a' && *ptr != '\r' && *ptr != '\f' && *ptr != '\n' && *ptr != '\0') {
-			current_align = 'l';
-		}
-
+		char current_align = 'l';
 		const char *sub_ptr = ptr;
-		int sub_width = 0;
 		while (sub_ptr < line_end && *sub_ptr != '\0') {
-			if (*sub_ptr == '\a' || *sub_ptr == '\r' || *sub_ptr == '\f') {
-				if (*sub_ptr == '\a')
-					current_align = 'c';
-				else if (*sub_ptr == '\r')
-					current_align = 'r';
-				else if (*sub_ptr == '\f')
-					current_align = 'l';
+			if (*sub_ptr == '\a') {
+				current_align = 'c';
 				sub_ptr++;
 				continue;
 			}
+			else if (*sub_ptr == '\r') {
+				current_align = 'r';
+				sub_ptr++;
+				continue;
+			}
+			else if (*sub_ptr == '\f') {
+				current_align = 'l';
+				sub_ptr++;
+				continue;
+			}
+
 			if (*sub_ptr == '\b') {
 				sub_ptr++;
 				continue;
 			}
+
 			int cp = next_utf8_codepoint(&sub_ptr);
 			int step = get_pcf_char_step(slot, cp, def_w);
-			sub_width += step;
+			if (current_align == 'l')
+				left_width += step;
+			else if (current_align == 'c')
+				center_width += step;
+			else if (current_align == 'r')
+				right_width += step;
 		}
 
-		if (sub_width > max_estimated_width) {
-			max_estimated_width = sub_width;
+		int line_total_width = left_width + center_width + right_width;
+		if (line_total_width > max_estimated_width) {
+			max_estimated_width = line_total_width;
 		}
 
 		if (!dry_run) {
-			int target_x = base_x;
-			if (current_align == 'c') {
-				target_x = ((int)plane->width - sub_width) / 2;
-			}
-			else if (current_align == 'r') {
-				target_x = (int)plane->width - sub_width - base_x;
-			}
-
-			int current_x = target_x;
+			int current_x_l = 0;
+			int current_x_c = ((int)plane->width - center_width) / 2;
+			int current_x_r = (int)plane->width - right_width;
 			int current_y = base_y + def_h * line_idx;
 			const char *render_ptr = ptr;
+			current_align = 'l';
 
 			while (render_ptr < line_end && *render_ptr != '\0') {
-				if (*render_ptr == '\a' || *render_ptr == '\r' || *render_ptr == '\f') {
+				if (*render_ptr == '\a') {
+					current_align = 'c';
 					render_ptr++;
 					continue;
 				}
-				if (*render_ptr == '\b') {
+				else if (*render_ptr == '\r') {
+					current_align = 'r';
+					render_ptr++;
+					continue;
+				}
+				else if (*render_ptr == '\f') {
+					current_align = 'l';
+					render_ptr++;
+					continue;
+				}
+				else if (*render_ptr == '\b') {
 					render_ptr++;
 					is_bold = !is_bold;
 					continue;
 				}
 
 				int codepoint = next_utf8_codepoint(&render_ptr);
-				render_char(plane, slot, codepoint, current_x, current_y, 0);
-				if (is_bold) {
-					render_char(plane, slot, codepoint, current_x - 1, current_y, 0);
+				int step = get_pcf_char_step(slot, codepoint, def_w);
+				int draw_x = 0;
+				if (current_align == 'l') {
+					draw_x = current_x_l;
+					current_x_l += step;
+				}
+				else if (current_align == 'c') {
+					draw_x = current_x_c;
+					current_x_c += step;
+				}
+				else if (current_align == 'r') {
+					draw_x = current_x_r;
+					current_x_r += step;
 				}
 
-				int step = get_pcf_char_step(slot, codepoint, def_w);
-				current_x += step;
+				render_char(plane, slot, codepoint, draw_x, current_y, 0);
+				if (is_bold) {
+					render_char(plane, slot, codepoint, draw_x - 1, current_y, 0);
+				}
 			}
 		}
 
@@ -586,6 +612,7 @@ void render_text_format(struct gplane *plane, int slot, const char *format_str)
 		if (*ptr == '\n') {
 			ptr++;
 		}
+
 		line_idx++;
 	}
 
