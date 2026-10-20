@@ -70,8 +70,8 @@ install: $(TARGET)
 	$(call log,INSTALL,$(TARGET))
 	$(Q)install -d $(DESTDIR)$(BINDIR)
 	$(Q)install -m 755 $(TARGET) $(DESTDIR)$(BINDIR)/$(TARGET)
-ifneq ($(FONTS),)
 	$(Q)install -d $(DESTDIR)$(SHARE_INSTDIR)/$(FONT_DIR)
+ifneq ($(FONTS),)
 	$(Q)install -m 644 $(FONTS) $(DESTDIR)$(SHARE_INSTDIR)/$(FONT_DIR)/
 endif
 
@@ -80,9 +80,9 @@ uninstall:
 	$(Q)rm -f $(DESTDIR)$(BINDIR)/$(TARGET)
 ifneq ($(FONTS),)
 	$(Q)rm -f $(addprefix $(DESTDIR)$(SHARE_INSTDIR)/$(FONT_DIR)/,$(notdir $(FONTS)))
+endif
 	$(Q)rmdir $(DESTDIR)$(SHARE_INSTDIR)/$(FONT_DIR) 2>/dev/null || true
 	$(Q)rmdir $(DESTDIR)$(SHARE_INSTDIR) 2>/dev/null || true
-endif
 
 clean:
 	$(call log,CLEAN,objects)
